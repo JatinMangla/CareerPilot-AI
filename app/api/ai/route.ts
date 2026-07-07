@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { tasks } from "@/lib/prompts";
+import { geminiText, geminiJson } from "@/lib/gemini";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel clamps to plan limit
@@ -7,9 +8,18 @@ export const maxDuration = 300; // Vercel clamps to plan limit
 const MODEL = "claude-opus-4-8";
 
 export async function POST(req: Request) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const provider = process.env.ANTHROPIC_API_KEY
+    ? "anthropic"
+    : process.env.GEMINI_API_KEY
+    ? "gemini"
+    : null;
+
+  if (!provider) {
     return Response.json(
-      { error: "ANTHROPIC_API_KEY is not set. Add it to .env.local (see .env.local.example)." },
+      {
+        error:
+          "No AI key configured. Add ANTHROPIC_API_KEY (best quality) or a free GEMINI_API_KEY from https://aistudio.google.com/apikey.",
+      },
       { status: 500 }
     );
   }
@@ -26,13 +36,28 @@ export async function POST(req: Request) {
     return Response.json({ error: `Unknown task: ${body.task}` }, { status: 400 });
   }
 
-  const client = new Anthropic();
   const { system, user } = def.build(body.input || {});
   const systemPrompt = body.strategyAddendum
     ? `${system}\n\n<evolved_strategy>\n${body.strategyAddendum}\n</evolved_strategy>`
     : system;
 
   try {
+    // ---------- Free fallback provider (Gemini) ----------
+    if (provider === "gemini") {
+      if (def.mode === "json") {
+        const json = await geminiJson(systemPrompt, user, def.maxTokens ?? 8000, def.schema!);
+        return new Response(json, {
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+        });
+      }
+      const text = await geminiText(systemPrompt, user, def.maxTokens ?? 32000);
+      return new Response(text, {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
+
+    // ---------- Primary provider (Claude) ----------
+    const client = new Anthropic();
     if (def.mode === "json") {
       const response = (await client.messages.create({
         model: MODEL,
