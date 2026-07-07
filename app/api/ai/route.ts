@@ -47,12 +47,18 @@ export async function POST(req: Request) {
       if (def.mode === "json") {
         const json = await geminiJson(systemPrompt, user, def.maxTokens ?? 8000, def.schema!);
         return new Response(json, {
-          headers: { "Content-Type": "application/json; charset=utf-8" },
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "x-ai-provider": "gemini",
+          },
         });
       }
       const text = await geminiText(systemPrompt, user, def.maxTokens ?? 32000);
       return new Response(text, {
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "x-ai-provider": "gemini",
+        },
       });
     }
 
@@ -77,7 +83,10 @@ export async function POST(req: Request) {
         return Response.json({ error: "Empty AI response" }, { status: 502 });
       }
       return new Response(text, {
-        headers: { "Content-Type": "application/json; charset=utf-8" },
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "x-ai-provider": "anthropic",
+        },
       });
     }
 
@@ -112,7 +121,10 @@ export async function POST(req: Request) {
     });
 
     return new Response(readable, {
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "x-ai-provider": "anthropic",
+      },
     });
   } catch (err: any) {
     const status = typeof err?.status === "number" ? err.status : 500;

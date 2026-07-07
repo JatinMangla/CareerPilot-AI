@@ -193,7 +193,7 @@ ${JSON.stringify(jobs, null, 2)}
 ${resume}
 </resume>
 
-Return the same jobs enriched: keep id/title/company/location/url/description from the listing (salary: use listing salary or estimate a realistic range), source (set to "adzuna"), and add matchScore, pros, cons (honest), jobSecurity, futureOutlook, recommendation.`,
+Return the same jobs enriched: keep id/title/company/location/url/description/source from the listing exactly as given (salary: use listing salary or estimate a realistic range), and add matchScore, pros, cons (honest), jobSecurity, futureOutlook, recommendation.`,
     }),
     schema: obj({ jobs: { type: "array", items: jobSchema } }),
   },

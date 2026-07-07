@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { store, defaultStats } from "@/lib/store";
+import { quota, type QuotaInfo } from "@/lib/quota";
 import type { ResumeData, ValidationResult, UsageStats, Strategy } from "@/lib/types";
 
 export default function Dashboard() {
@@ -12,6 +13,7 @@ export default function Dashboard() {
   const [strategy, setStrategy] = useState<Strategy | null>(null);
   const [appsCount, setAppsCount] = useState(0);
   const [jobsCount, setJobsCount] = useState(0);
+  const [quotas, setQuotas] = useState<QuotaInfo[]>([]);
 
   useEffect(() => {
     setResume(store.getResume());
@@ -20,6 +22,7 @@ export default function Dashboard() {
     setStrategy(store.getStrategy());
     setAppsCount(store.getApps().length);
     setJobsCount(store.getJobs().length);
+    setQuotas(quota.all());
   }, []);
 
   const steps = [
@@ -111,6 +114,35 @@ export default function Dashboard() {
           </ul>
         </div>
         <div className="card-pad">
+          <h2 className="h2 mb-3">Free-tier usage</h2>
+          <div className="space-y-4">
+            {quotas.map((q) => {
+              const pct = Math.min(100, Math.round((q.used / q.limit) * 100));
+              const color =
+                pct >= 100 ? "bg-coral-500" : pct >= q.warnAt * 100 ? "bg-amberx-500" : "bg-neon-500";
+              return (
+                <div key={q.key}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-ink-300">{q.label}</span>
+                    <span className="text-ink-100 font-semibold">
+                      {q.used}/{q.limit} per {q.period}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-ink-800 overflow-hidden">
+                    <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+            <p className="text-[11px] text-ink-400 leading-relaxed">
+              You&apos;ll get a warning banner before any free limit is crossed, and calls
+              pause at the limit. No card is attached to these services, so{" "}
+              <b className="text-ink-200">no bill can ever be generated</b> — usage simply
+              resets next day/month.
+            </p>
+          </div>
+        </div>
+        <div className="card-pad md:col-span-2">
           <h2 className="h2 mb-3">Honest by design</h2>
           <p className="text-sm text-ink-300 leading-relaxed">
             CareerPilot maximizes your odds — sharper resume, tailored applications,

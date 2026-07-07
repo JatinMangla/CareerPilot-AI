@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import UsageBanner from "./UsageBanner";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: "◆" },
@@ -96,7 +97,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      <main className="flex-1 min-w-0 p-4 md:p-8 max-w-6xl">{children}</main>
+      <main className="flex-1 min-w-0 p-4 md:p-8 max-w-6xl">
+        <UsageBanner />
+        {children}
+      </main>
     </div>
   );
 }

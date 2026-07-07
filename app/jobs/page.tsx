@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
+import { quota } from "@/lib/quota";
 import type { Job } from "@/lib/types";
 
 export default function JobsPage() {
@@ -36,7 +37,10 @@ export default function JobsPage() {
 
       let result: { jobs: Job[] };
       if (live.available && live.listings?.length) {
-        setStatus(`Analyzing ${live.listings.length} live listings against your resume…`);
+        quota.bump("jobsApi");
+        setStatus(
+          `Analyzing ${live.listings.length} live listings (${live.source}) against your resume…`
+        );
         result = await jsonTask<{ jobs: Job[] }>("analyze_jobs", {
           jobs: live.listings,
           resume: resume.text,
@@ -101,11 +105,13 @@ export default function JobsPage() {
 
       {jobs.length > 0 && (
         <>
-          {jobs[0]?.source === "ai-researched" && (
+          {jobs[0]?.source === "ai-researched" ? (
             <div className="text-xs text-amberx-400 bg-amberx-500/10 border border-amberx-500/25 rounded-xl px-4 py-3">
-              These are AI-researched leads (no live job API key configured) — verify each
-              on the portal before applying. Add free Adzuna keys in settings to get live
-              listings.
+              These are AI-researched leads — verify each on the portal before applying.
+            </div>
+          ) : (
+            <div className="text-xs text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3">
+              ✓ Live listings from {jobs[0]?.source === "jsearch" ? "Google for Jobs (LinkedIn/Indeed/Glassdoor)" : "Adzuna"}, analyzed by AI against your resume.
             </div>
           )}
           <div className="grid gap-4">
