@@ -10,8 +10,9 @@ export default function ResumePage() {
   const [text, setText] = useState("");
   const [instructions, setInstructions] = useState("");
   const [aiOutput, setAiOutput] = useState("");
-  const [busy, setBusy] = useState<"" | "upload" | "improve">("");
+  const [busy, setBusy] = useState<"" | "upload" | "improve" | "pdf">("");
   const [error, setError] = useState("");
+  const [tpl, setTpl] = useState<"classic" | "modern">("classic");
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -19,7 +20,30 @@ export default function ResumePage() {
     const r = store.getResume();
     setResume(r);
     if (r) setText(r.text);
+    const saved = window.localStorage.getItem("cp_pdf_template");
+    if (saved === "classic" || saved === "modern") setTpl(saved);
   }, []);
+
+  async function downloadPdf() {
+    if (!text.trim()) return setError("Nothing to download — add your resume first.");
+    setError("");
+    setBusy("pdf");
+    try {
+      const { buildResumePdf, downloadBlob } = await import("@/lib/pdf/resumeDoc");
+      const name = store.getProfile().name || "Resume";
+      const blob = await buildResumePdf(text, name, tpl);
+      downloadBlob(blob, `${name.replace(/\s+/g, "_")}_Resume.pdf`);
+    } catch (err: any) {
+      setError(`PDF failed: ${err.message}`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function pickTemplate(t: "classic" | "modern") {
+    setTpl(t);
+    window.localStorage.setItem("cp_pdf_template", t);
+  }
 
   function save(newText: string, label: string, fileName?: string) {
     const prev = store.getResume();
@@ -141,6 +165,22 @@ export default function ResumePage() {
               disabled={!text.trim()}
             >
               Save resume
+            </button>
+            <select
+              className="input w-auto py-2 text-xs"
+              value={tpl}
+              onChange={(e) => pickTemplate(e.target.value as "classic" | "modern")}
+              title="PDF design"
+            >
+              <option value="classic">Classic (traditional)</option>
+              <option value="modern">Modern (tech)</option>
+            </select>
+            <button
+              className="btn-secondary"
+              onClick={downloadPdf}
+              disabled={!text.trim() || busy === "pdf"}
+            >
+              {busy === "pdf" ? "Generating…" : "⬇ Download PDF"}
             </button>
             {resume && (
               <span className="text-xs text-ink-400">

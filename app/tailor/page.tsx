@@ -253,6 +253,22 @@ export default function TailorPage() {
               </button>
               <button
                 className="btn-secondary"
+                disabled={!output.trim()}
+                onClick={async () => {
+                  const { buildResumePdf, downloadBlob } = await import("@/lib/pdf/resumeDoc");
+                  const name = store.getProfile().name || "Resume";
+                  const saved = window.localStorage.getItem("cp_pdf_template");
+                  const tpl = saved === "modern" ? "modern" : "classic";
+                  downloadBlob(
+                    await buildResumePdf(output, name, tpl),
+                    `${name.replace(/\s+/g, "_")}_Resume_Tailored.pdf`
+                  );
+                }}
+              >
+                ⬇ Download PDF
+              </button>
+              <button
+                className="btn-secondary"
                 onClick={() => navigator.clipboard.writeText(output)}
               >
                 Copy

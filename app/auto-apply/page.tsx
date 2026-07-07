@@ -295,16 +295,36 @@ function AppCard({
       {open && (
         <div className="mt-4 space-y-4">
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-1.5 gap-2">
               <h4 className="text-xs font-bold uppercase tracking-wider text-ink-300">
                 Cover letter
               </h4>
-              <button
-                className="text-xs text-neon-400 hover:underline"
-                onClick={() => copy("cover", app.coverLetter)}
-              >
-                {copied === "cover" ? "Copied ✓" : "Copy"}
-              </button>
+              <div className="flex gap-3">
+                <button
+                  className="text-xs text-neon-400 hover:underline"
+                  onClick={async () => {
+                    const { buildLetterPdf, downloadBlob } = await import("@/lib/pdf/resumeDoc");
+                    const { store } = await import("@/lib/store");
+                    const name = store.getProfile().name || "Candidate";
+                    downloadBlob(
+                      await buildLetterPdf(
+                        name,
+                        `Cover Letter — ${app.jobTitle}, ${app.company}`,
+                        app.coverLetter
+                      ),
+                      `${name.replace(/\s+/g, "_")}_CoverLetter_${app.company.replace(/\s+/g, "_")}.pdf`
+                    );
+                  }}
+                >
+                  ⬇ PDF
+                </button>
+                <button
+                  className="text-xs text-neon-400 hover:underline"
+                  onClick={() => copy("cover", app.coverLetter)}
+                >
+                  {copied === "cover" ? "Copied ✓" : "Copy"}
+                </button>
+              </div>
             </div>
             <p className="text-xs text-ink-200 leading-relaxed bg-ink-850 rounded-xl p-3 whitespace-pre-wrap">
               {app.coverLetter}
