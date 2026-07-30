@@ -198,6 +198,90 @@ Return the same jobs enriched: keep id/title/company/location/url/description/so
     schema: obj({ jobs: { type: "array", items: jobSchema } }),
   },
 
+  // ---------- Auto-Pilot: tailor with an approval gate ----------
+  auto_tailor: {
+    mode: "json",
+    maxTokens: 20000,
+    build: ({ resume, job, profile }) => ({
+      system: `${SYSTEM_BASE}
+
+You are preparing an application that may be SUBMITTED AUTOMATICALLY without further human review. Integrity rules are absolute:
+- A "safeChange" only rewords, reorders, or re-emphasizes experience that ALREADY EXISTS in the resume. Changing "Built dashboards" to "Built responsive React dashboards used by 200+ users" is only safe if BOTH the React work and the user count already appear in the resume.
+- Anything that would state a skill, tool, metric, responsibility, or timeframe not present in the resume is a "newClaim" — even if it is likely true. Never quietly promote a newClaim to a safeChange.
+- If the resume genuinely cannot support a requirement, say so in the summary rather than inventing coverage.`,
+      user: `Tailor my resume for this specific job.
+
+<resume>
+${resume}
+</resume>
+
+<job>
+${JSON.stringify(job, null, 2)}
+</job>
+
+<profile>
+${JSON.stringify(profile)}
+</profile>
+
+Produce:
+1. "verdict" — "ready" if newClaims is empty, otherwise "needs_approval".
+2. "summary" — 2-3 sentences: how well I fit, and what tailoring you did.
+3. "safeChanges" — reframings of existing resume content. Each: short unique id, section, before (exact current text), after, reason tied to the job.
+4. "newClaims" — changes that would assert something NOT in my resume. Each: id, section, before (or "NEW"), after, reason, and "question" phrased directly to me (e.g. "Have you used TypeScript with Redux Toolkit in production?").
+5. "tailoredResume" — my full resume with ONLY the safeChanges applied. Clean plain text, section headers in CAPS, bullets with "-". No placeholders, no [confirm] markers, no commentary — this file may be submitted as-is.
+6. "coverLetter" — 150-220 words, specific to this company and role, using only real experience.
+7. "screeningAnswers" — 6-8 questions this employer's application form is likely to ask (notice period, expected CTC, current location, willingness to relocate, years with React, work authorization, why this company), each with a ready-to-submit answer and a "confidence" of "high" (safe to auto-submit) or "low" (needs my input). Use my profile for facts; mark anything you had to guess as low confidence.`,
+    }),
+    schema: obj({
+      verdict: str,
+      summary: str,
+      safeChanges: {
+        type: "array",
+        items: obj({ id: str, section: str, before: str, after: str, reason: str }),
+      },
+      newClaims: {
+        type: "array",
+        items: obj({
+          id: str,
+          section: str,
+          before: str,
+          after: str,
+          reason: str,
+          question: str,
+        }),
+      },
+      tailoredResume: str,
+      coverLetter: str,
+      screeningAnswers: {
+        type: "array",
+        items: obj({ question: str, answer: str, confidence: str }),
+      },
+    }),
+  },
+
+  merge_claims: {
+    mode: "stream",
+    maxTokens: 20000,
+    build: ({ resume, approvedClaims, answers }) => ({
+      system: SYSTEM_BASE,
+      user: `Merge ONLY these approved changes into my resume. Do not add anything else.
+
+<resume>
+${resume}
+</resume>
+
+<approved_changes>
+${JSON.stringify(approvedClaims, null, 2)}
+</approved_changes>
+
+<my_answers>
+${answers || "(none)"}
+</my_answers>
+
+Output ONLY the final resume in clean plain text (CAPS section headers, "-" bullets). No commentary, no placeholders — this file will be submitted to employers as-is.`,
+    }),
+  },
+
   // ---------- Auto-apply preparation ----------
   prepare_application: {
     mode: "json",

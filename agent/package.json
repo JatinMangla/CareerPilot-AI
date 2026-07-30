@@ -1,0 +1,14 @@
+{
+  "name": "careerpilot-apply-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local browser agent that submits CareerPilot applications on official company career sites.",
+  "scripts": {
+    "postinstall": "playwright install chromium",
+    "apply": "node apply.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

@@ -19,6 +19,13 @@ export interface Profile {
   locations: string;
   desiredRoles: string;
   portals: string[]; // which portals to target in auto-apply
+  /* Used by the Auto-Pilot agent to fill application forms */
+  phone?: string;
+  linkedin?: string;
+  github?: string;
+  portfolio?: string;
+  noticePeriod?: string;
+  expectedCtc?: string;
 }
 
 export interface ValidationCategory {
@@ -79,6 +86,55 @@ export interface PreparedApplication {
   coverLetter: string;
   tailoredHighlights: string[];
   screeningAnswers: { question: string; answer: string }[];
+  at: number;
+}
+
+/* ---------- Auto-Pilot (direct apply on company career sites) ---------- */
+
+export interface TailorChange {
+  id: string;
+  section: string;
+  before: string;
+  after: string;
+  reason: string;
+  /** Only present on newClaims — what the AI needs to confirm with you. */
+  question?: string;
+}
+
+export interface AutoTailorPlan {
+  verdict: "ready" | "needs_approval";
+  summary: string;
+  /** Reframings of experience already in your resume — applied automatically. */
+  safeChanges: TailorChange[];
+  /** Would assert something not in your resume — requires your yes/no. */
+  newClaims: TailorChange[];
+  /** Resume with ONLY the safe changes applied. */
+  tailoredResume: string;
+  coverLetter: string;
+  screeningAnswers: { question: string; answer: string; confidence: string }[];
+}
+
+export type QueueStatus =
+  | "planning"
+  | "needs_approval"
+  | "approved"
+  | "exported"
+  | "submitted"
+  | "failed";
+
+export interface QueuedApplication {
+  jobId: string;
+  title: string;
+  company: string;
+  url: string;
+  atsKind: string;
+  atsLabel: string;
+  autoSubmit: boolean;
+  status: QueueStatus;
+  plan: AutoTailorPlan | null;
+  approvedClaimIds: string[];
+  finalResume: string;
+  error?: string;
   at: number;
 }
 

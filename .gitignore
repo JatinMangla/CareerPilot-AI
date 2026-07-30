@@ -10,3 +10,9 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# Auto-apply agent — local runtime + personal application data
+agent/node_modules/
+agent/apply-queue.json
+agent/results.json
+agent/screenshots/

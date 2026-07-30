@@ -6,6 +6,7 @@ import type {
   ValidationResult,
   Job,
   PreparedApplication,
+  QueuedApplication,
   Strategy,
   UsageStats,
 } from "./types";
@@ -16,6 +17,7 @@ const KEYS = {
   validation: "cp_validation",
   jobs: "cp_jobs",
   apps: "cp_apps",
+  queue: "cp_queue",
   strategy: "cp_strategy",
   stats: "cp_stats",
 } as const;
@@ -53,6 +55,12 @@ export const defaultProfile: Profile = {
   locations: "India (Remote / Hybrid)",
   desiredRoles: "Frontend Developer, React Developer, UI Engineer",
   portals: ["LinkedIn", "Naukri", "Indeed", "Wellfound"],
+  phone: "",
+  linkedin: "",
+  github: "",
+  portfolio: "",
+  noticePeriod: "",
+  expectedCtc: "",
 };
 
 export const defaultStrategy: Strategy = {
@@ -87,6 +95,9 @@ export const store = {
 
   getApps: () => read<PreparedApplication[]>(KEYS.apps, []),
   setApps: (a: PreparedApplication[]) => write(KEYS.apps, a),
+
+  getQueue: () => read<QueuedApplication[]>(KEYS.queue, []),
+  setQueue: (q: QueuedApplication[]) => write(KEYS.queue, q),
 
   getStrategy: () => read<Strategy>(KEYS.strategy, defaultStrategy),
   setStrategy: (s: Strategy) => write(KEYS.strategy, s),

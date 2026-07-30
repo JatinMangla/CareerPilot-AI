@@ -171,6 +171,73 @@ export default function EvolvePage() {
               />
             </div>
           </div>
+
+          <div className="pt-2 border-t border-ink-800">
+            <h3 className="font-display font-bold text-sm text-ink-100 mb-1">
+              Application form details
+            </h3>
+            <p className="text-xs text-ink-400 mb-3">
+              Auto-Pilot fills these into company application forms. Blank fields are left
+              for you to complete, so filling them here means fewer manual steps.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Phone</label>
+                <input
+                  className="input"
+                  placeholder="+91 98765 43210"
+                  value={profile.phone || ""}
+                  onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">LinkedIn URL</label>
+                <input
+                  className="input"
+                  placeholder="https://linkedin.com/in/…"
+                  value={profile.linkedin || ""}
+                  onChange={(e) => setProfile({ ...profile, linkedin: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">GitHub URL</label>
+                <input
+                  className="input"
+                  placeholder="https://github.com/JatinMangla"
+                  value={profile.github || ""}
+                  onChange={(e) => setProfile({ ...profile, github: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Portfolio / website</label>
+                <input
+                  className="input"
+                  placeholder="https://…"
+                  value={profile.portfolio || ""}
+                  onChange={(e) => setProfile({ ...profile, portfolio: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Notice period</label>
+                <input
+                  className="input"
+                  placeholder="e.g. 30 days / Immediate"
+                  value={profile.noticePeriod || ""}
+                  onChange={(e) => setProfile({ ...profile, noticePeriod: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Expected CTC</label>
+                <input
+                  className="input"
+                  placeholder="e.g. ₹12 LPA"
+                  value={profile.expectedCtc || ""}
+                  onChange={(e) => setProfile({ ...profile, expectedCtc: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+
           <button className="btn-primary" onClick={saveProfile}>
             Save profile
           </button>
