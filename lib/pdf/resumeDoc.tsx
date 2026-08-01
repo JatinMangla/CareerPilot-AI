@@ -28,6 +28,18 @@ interface Parsed {
 const SECTION_RE = /^[A-Z0-9][A-Z0-9\s&/\-–—:().,+']{1,46}$/;
 const BULLET_RE = /^[-•▸*·]\s+/;
 
+/** Words that mark a real section header, so a CAPS name isn't mistaken for one. */
+const SECTION_WORDS =
+  /\b(summary|objective|profile|experience|employment|history|education|skills?|projects?|certification|achievements?|awards?|contact|interests?|languages?|publications?|references?|training|courses?|activities|volunteer|portfolio|expertise|competenc|highlights?)\b/i;
+
+function normalizeName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function isSection(line: string): boolean {
   return (
     line.length <= 48 &&
@@ -35,6 +47,21 @@ function isSection(line: string): boolean {
     /[A-Z]/.test(line) &&
     SECTION_RE.test(line)
   );
+}
+
+/**
+ * The first line of a resume is the candidate's name, but it's often written in
+ * CAPS — which also looks exactly like a section header. Decide by content.
+ */
+function looksLikeName(line: string, fallbackName: string): boolean {
+  const clean = line.replace(/\*\*/g, "").trim();
+  if (!clean) return false;
+  if (normalizeName(clean) === normalizeName(fallbackName)) return true;
+  if (SECTION_WORDS.test(clean)) return false;
+  if (/[@|:•]|https?:/i.test(clean)) return false; // contact line, not a name
+  if (/\d/.test(clean)) return false;
+  const words = clean.split(/\s+/);
+  return words.length >= 1 && words.length <= 5;
 }
 
 export function parseResume(text: string, fallbackName: string): Parsed {
@@ -45,10 +72,10 @@ export function parseResume(text: string, fallbackName: string): Parsed {
   let name = fallbackName;
   const contact: string[] = [];
 
-  if (i < lines.length && !isSection(lines[i])) {
+  if (i < lines.length && looksLikeName(lines[i], fallbackName)) {
     name = lines[i].replace(/\*\*/g, "");
     i++;
-    // contact lines until blank or section (max 3)
+    // contact lines until blank or a real section header (max 3)
     let taken = 0;
     while (i < lines.length && lines[i] && !isSection(lines[i]) && taken < 3) {
       contact.push(lines[i]);
@@ -57,10 +84,18 @@ export function parseResume(text: string, fallbackName: string): Parsed {
     }
   }
 
+  const nameKey = normalizeName(name);
+  const contactKeys = new Set(contact.map((c) => c.trim()));
+
   const blocks: Block[] = [];
   for (; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
+    // The name and contact details are already rendered in the header — never
+    // repeat them in the body.
+    if (normalizeName(line) === nameKey) continue;
+    if (contactKeys.has(line)) continue;
+
     if (isSection(line)) blocks.push({ type: "section", text: line });
     else if (BULLET_RE.test(line))
       blocks.push({ type: "bullet", text: line.replace(BULLET_RE, "") });
