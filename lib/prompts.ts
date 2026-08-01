@@ -448,6 +448,56 @@ Return:
     schema: obj({ subject: str, body: str, note: str }),
   },
 
+  // ---------- Inbox triage ----------
+  classify_inbox: {
+    mode: "json",
+    maxTokens: 16000,
+    build: ({ emails, profile }) => ({
+      system: `${SYSTEM_BASE}
+
+You are triaging a job-seeker's inbox. Be decisive and accurate — they rely on this instead of reading Gmail themselves. Categories:
+- "applied_reply": a response to an application THEY submitted (interview invite, assessment link, status update, rejection, recruiter following up on their application).
+- "recruiter_outreach": a recruiter or company contacting them directly about a specific opportunity — a real human reaching out, or a reply to their outreach.
+- "job_alert": automated job suggestions/alerts (LinkedIn, Naukri, Indeed, Instahyre digests, newsletters listing roles).
+- "bulk_requirement": mass "requirement" blasts from consultancies/staffing firms — many roles, impersonal, often for other people's profiles.
+- "not_job": anything else (bills, OTPs, promotions, personal, social). Mark these irrelevant.
+
+Never invent a company or role that isn't in the email.`,
+      user: `Classify each email below for ${profile?.name || "the candidate"} (target role: ${profile?.desiredRoles || "React Developer"}).
+
+<emails>
+${JSON.stringify(emails, null, 2)}
+</emails>
+
+For each email return:
+- "uid": copy the uid exactly.
+- "category": one of applied_reply | recruiter_outreach | job_alert | bulk_requirement | not_job
+- "relevance": 0-100 — how much it matters to their job search right now. Interview invites and direct recruiter mail score highest; generic digests low; not_job = 0.
+- "company": the hiring company if identifiable, else "".
+- "role": the role mentioned if identifiable, else "".
+- "summary": ONE short line telling them what this email actually wants. No fluff.
+- "actionNeeded": true if it expects a response or a deadline-bound step.
+- "suggestedAction": one of "reply" | "apply" | "schedule" | "ignore"
+- "deadline": any date/time mentioned they must act by, else "".`,
+    }),
+    schema: obj({
+      results: {
+        type: "array",
+        items: obj({
+          uid: str,
+          category: str,
+          relevance: int,
+          company: str,
+          role: str,
+          summary: str,
+          actionNeeded: { type: "boolean" },
+          suggestedAction: str,
+          deadline: str,
+        }),
+      },
+    }),
+  },
+
   // ---------- Self-improvement (Evolve) ----------
   meta_optimize: {
     mode: "json",

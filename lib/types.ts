@@ -138,6 +138,44 @@ export interface QueuedApplication {
   at: number;
 }
 
+/* ---------- Inbox triage ---------- */
+
+export type MailCategory =
+  | "applied_reply"
+  | "recruiter_outreach"
+  | "job_alert"
+  | "bulk_requirement"
+  | "not_job";
+
+export interface InboxMessage {
+  uid: string;
+  from: string;
+  fromName: string;
+  fromAddress: string;
+  subject: string;
+  date: string;
+  snippet: string;
+  body: string;
+  /* filled in by AI triage */
+  category?: MailCategory;
+  relevance?: number;
+  company?: string;
+  role?: string;
+  summary?: string;
+  actionNeeded?: boolean;
+  suggestedAction?: string;
+  deadline?: string;
+  handled?: boolean;
+}
+
+export interface OutreachDraft {
+  mode: "new" | "reply";
+  to: string;
+  role?: string;
+  company?: string;
+  context?: string;
+}
+
 export interface SentEmail {
   id: string;
   to: string;

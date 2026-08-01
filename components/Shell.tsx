@@ -13,6 +13,7 @@ const NAV = [
   { href: "/jobs", label: "Job Matches", icon: "◎" },
   { href: "/autopilot", label: "Auto-Pilot", icon: "🤖" },
   { href: "/auto-apply", label: "Apply Kits", icon: "➤" },
+  { href: "/inbox", label: "Job Inbox", icon: "📥" },
   { href: "/outreach", label: "HR Outreach", icon: "✉" },
   { href: "/interview", label: "Mock Interview", icon: "🎙" },
   { href: "/practice", label: "Practice", icon: "{}" },

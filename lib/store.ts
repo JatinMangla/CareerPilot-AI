@@ -8,6 +8,8 @@ import type {
   PreparedApplication,
   QueuedApplication,
   SentEmail,
+  InboxMessage,
+  OutreachDraft,
   Strategy,
   UsageStats,
 } from "./types";
@@ -20,6 +22,9 @@ const KEYS = {
   apps: "cp_apps",
   queue: "cp_queue",
   emails: "cp_emails",
+  inbox: "cp_inbox",
+  lastSync: "cp_last_sync",
+  draft: "cp_outreach_draft",
   strategy: "cp_strategy",
   stats: "cp_stats",
 } as const;
@@ -103,6 +108,20 @@ export const store = {
 
   getEmails: () => read<SentEmail[]>(KEYS.emails, []),
   setEmails: (e: SentEmail[]) => write(KEYS.emails, e),
+
+  getInbox: () => read<InboxMessage[]>(KEYS.inbox, []),
+  setInbox: (m: InboxMessage[]) => write(KEYS.inbox, m),
+
+  getLastSync: () => read<string | null>(KEYS.lastSync, null),
+  setLastSync: (iso: string) => write(KEYS.lastSync, iso),
+
+  /** Hand a prefilled draft to the Outreach page. */
+  setDraft: (d: OutreachDraft) => write(KEYS.draft, d),
+  takeDraft: (): OutreachDraft | null => {
+    const d = read<OutreachDraft | null>(KEYS.draft, null);
+    if (d && typeof window !== "undefined") window.localStorage.removeItem(KEYS.draft);
+    return d;
+  },
 
   getStrategy: () => read<Strategy>(KEYS.strategy, defaultStrategy),
   setStrategy: (s: Strategy) => write(KEYS.strategy, s),

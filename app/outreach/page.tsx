@@ -29,6 +29,16 @@ export default function OutreachPage() {
   useEffect(() => {
     setSent(store.getEmails());
     setHasResume(!!store.getResume()?.text);
+
+    // Picked "Reply with AI" in the Job Inbox? Prefill everything.
+    const draft = store.takeDraft();
+    if (draft) {
+      setMode(draft.mode);
+      setTo(draft.to);
+      if (draft.role) setRole(draft.role);
+      if (draft.company) setCompany(draft.company);
+      if (draft.context) setContext(draft.context);
+    }
   }, []);
 
   async function compose() {
