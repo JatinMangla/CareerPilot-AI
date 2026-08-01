@@ -499,6 +499,37 @@ For each email return:
   },
 
   // ---------- Self-improvement (Evolve) ----------
+  merge_strategies: {
+    mode: "json",
+    maxTokens: 8000,
+    build: ({ current, claudeOutput, profile, stats }) => ({
+      system: `${SYSTEM_BASE}
+
+You are merging two independently written strategy documents into one. Both were written to guide an AI job-search assistant for this candidate. Your job is synthesis, not diplomacy:
+- Keep the sharpest, most specific, most actionable directive when the two overlap. Never keep both versions of the same idea.
+- If they contradict each other, pick the one that is better for this candidate's actual market and say why in the notes.
+- Drop anything vague or generic from either source.
+- The result must read as one coherent voice, not a stitched-together list.`,
+      user: `Merge these into a single improved strategy.
+
+<strategy_a_current_app>
+${current || "(empty baseline)"}
+</strategy_a_current_app>
+
+<strategy_b_from_claude_pro>
+${claudeOutput}
+</strategy_b_from_claude_pro>
+
+Candidate: ${JSON.stringify(profile)}
+Usage so far: ${JSON.stringify(stats)}
+
+Return:
+- "systemAddendum": the merged directives, max 300 words, pure instructions with no preamble. This is injected into every future AI task.
+- "notes": 3-6 bullets covering what you took from each source, what you cut, and how you resolved any conflict between them.`,
+    }),
+    schema: obj({ systemAddendum: str, notes: strArr }),
+  },
+
   meta_optimize: {
     mode: "json",
     maxTokens: 8000,

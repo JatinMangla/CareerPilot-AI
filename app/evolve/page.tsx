@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { store, defaultStats } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
+import { buildClaudeStrategyPrompt } from "@/lib/claudePrompt";
 import type { Strategy, Profile, UsageStats } from "@/lib/types";
 
 export default function EvolvePage() {
@@ -13,6 +14,10 @@ export default function EvolvePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [justEvolved, setJustEvolved] = useState(false);
+  const [claudePrompt, setClaudePrompt] = useState("");
+  const [claudeReply, setClaudeReply] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [merging, setMerging] = useState(false);
 
   useEffect(() => {
     setStrategy(store.getStrategy());
@@ -48,6 +53,53 @@ export default function EvolvePage() {
 
   function saveProfile() {
     if (profile) store.setProfile(profile);
+  }
+
+  function generateClaudePrompt() {
+    if (!profile || !strategy) return;
+    setClaudePrompt(
+      buildClaudeStrategyPrompt({
+        profile,
+        strategy,
+        stats,
+        resume: store.getResume()?.text,
+        validation: store.getValidation(),
+        feedback,
+      })
+    );
+    setCopied(false);
+  }
+
+  async function mergeBrains() {
+    if (!claudeReply.trim()) return setError("Paste Claude's answer first.");
+    setError("");
+    setMerging(true);
+    try {
+      const result = await jsonTask<{ systemAddendum: string; notes: string[] }>(
+        "merge_strategies",
+        {
+          current: strategy?.systemAddendum || "",
+          claudeOutput: claudeReply,
+          profile,
+          stats,
+        }
+      );
+      const next: Strategy = {
+        version: (strategy?.version ?? 1) + 1,
+        systemAddendum: result.systemAddendum,
+        notes: result.notes,
+        updatedAt: Date.now(),
+      };
+      store.setStrategy(next);
+      setStrategy(next);
+      setClaudeReply("");
+      setClaudePrompt("");
+      setJustEvolved(true);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setMerging(false);
+    }
   }
 
   return (
@@ -99,6 +151,81 @@ export default function EvolvePage() {
             strategy.
           </div>
         )}
+      </div>
+
+      {/* Two-brain mode */}
+      <div className="card-pad space-y-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="h2">🧠🧠 Two-brain mode</h2>
+            <p className="text-sm text-ink-300 mt-1 leading-relaxed max-w-2xl">
+              Get a second opinion from your Claude Pro subscription, then merge it with
+              this app&apos;s strategy. Claude tends to be stronger at nuanced positioning;
+              merging keeps the sharper directive from each.
+            </p>
+          </div>
+          <button className="btn-secondary" onClick={generateClaudePrompt}>
+            ① Build prompt for Claude
+          </button>
+        </div>
+
+        {claudePrompt && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                className="btn-primary text-xs"
+                onClick={() => {
+                  navigator.clipboard.writeText(claudePrompt);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+              >
+                {copied ? "✓ Copied" : "② Copy prompt"}
+              </button>
+              <a
+                href="https://claude.ai/new"
+                target="_blank"
+                rel="noreferrer"
+                className="btn-secondary text-xs"
+              >
+                ③ Open Claude Pro ↗
+              </a>
+              <span className="text-xs text-ink-400">
+                paste it there, then bring the answer back below
+              </span>
+            </div>
+            <details>
+              <summary className="text-xs text-ink-300 cursor-pointer hover:text-ink-100">
+                Preview the prompt ({claudePrompt.length.toLocaleString()} characters)
+              </summary>
+              <pre className="prose-out card p-3 mt-2 max-h-64 overflow-auto text-[11px]">
+                {claudePrompt}
+              </pre>
+            </details>
+          </div>
+        )}
+
+        <div>
+          <label className="label">④ Paste Claude&apos;s answer here</label>
+          <textarea
+            className="input min-h-[160px] resize-y text-[13px]"
+            placeholder="Paste everything Claude replied — the ===STRATEGY=== and ===NOTES=== blocks. Extra commentary is fine, it gets filtered out."
+            value={claudeReply}
+            onChange={(e) => setClaudeReply(e.target.value)}
+          />
+        </div>
+        <button
+          className="btn-primary"
+          onClick={mergeBrains}
+          disabled={merging || !claudeReply.trim()}
+        >
+          {merging ? "Merging both brains…" : "⑤ Merge into my strategy"}
+        </button>
+        <p className="text-[11px] text-ink-400 leading-relaxed">
+          Merging bumps your strategy version just like Evolve does — the result is
+          injected into every AI task afterwards. Nothing is sent to Anthropic from this
+          app; you&apos;re copy-pasting through your own Claude Pro chat.
+        </p>
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
