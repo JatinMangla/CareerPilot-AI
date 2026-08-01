@@ -138,6 +138,19 @@ export interface QueuedApplication {
   at: number;
 }
 
+export interface SentEmail {
+  id: string;
+  to: string;
+  cc?: string;
+  subject: string;
+  body: string;
+  role: string;
+  company?: string;
+  hadAttachment: boolean;
+  at: number;
+  followUpDue?: number;
+}
+
 export interface Strategy {
   version: number;
   systemAddendum: string;

@@ -7,6 +7,7 @@ import type {
   Job,
   PreparedApplication,
   QueuedApplication,
+  SentEmail,
   Strategy,
   UsageStats,
 } from "./types";
@@ -18,6 +19,7 @@ const KEYS = {
   jobs: "cp_jobs",
   apps: "cp_apps",
   queue: "cp_queue",
+  emails: "cp_emails",
   strategy: "cp_strategy",
   stats: "cp_stats",
 } as const;
@@ -98,6 +100,9 @@ export const store = {
 
   getQueue: () => read<QueuedApplication[]>(KEYS.queue, []),
   setQueue: (q: QueuedApplication[]) => write(KEYS.queue, q),
+
+  getEmails: () => read<SentEmail[]>(KEYS.emails, []),
+  setEmails: (e: SentEmail[]) => write(KEYS.emails, e),
 
   getStrategy: () => read<Strategy>(KEYS.strategy, defaultStrategy),
   setStrategy: (s: Strategy) => write(KEYS.strategy, s),

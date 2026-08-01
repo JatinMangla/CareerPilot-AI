@@ -399,6 +399,55 @@ Judge correctness by mentally executing it against the examples and edge cases. 
     }),
   },
 
+  // ---------- HR outreach email ----------
+  compose_email: {
+    mode: "json",
+    maxTokens: 8000,
+    build: ({ mode, role, company, toEmail, context, resume, profile, tone }) => ({
+      system: `${SYSTEM_BASE}
+
+You are writing a real email that will be sent from ${profile?.email || "the candidate's"} Gmail to a hiring manager or HR contact. Rules:
+- Recruiters skim on a phone. Keep the body under 160 words, short paragraphs, no walls of text.
+- Open with why you're writing, not "I hope this email finds you well".
+- Two or three concrete proof points pulled from the resume — real projects, real technologies. Never invent experience.
+- No buzzword stuffing, no "I am a passionate team player", no excessive flattery.
+- Close with one clear, low-friction ask (a short call, or their thoughts on fit).
+- The resume is attached as a PDF — reference it once, briefly.
+- Sign off with the candidate's real name, phone and links if available.
+- Plain text only. No markdown, no bullet characters unless genuinely useful (max 3 short bullets).`,
+      user: `${
+        mode === "reply"
+          ? "Write a REPLY to the message below from a recruiter/HR."
+          : "Write a cold application email to this HR/hiring contact."
+      }
+
+Role applying for: ${role || "React Developer"}
+${company ? `Company: ${company}` : ""}
+Recipient: ${toEmail || "(unknown)"}
+Desired tone: ${tone || "professional and direct"}
+
+${
+  context
+    ? `<context>\n${context}\n</context>\n(If this is a job description, mirror its key requirements using only my real experience. If it is their email to me, answer every question they asked.)`
+    : "(No extra context provided — write a strong general application for this role.)"
+}
+
+<my_resume>
+${resume}
+</my_resume>
+
+<my_profile>
+${JSON.stringify(profile)}
+</my_profile>
+
+Return:
+- "subject": a specific subject line (not "Job Application"). Include the role.
+- "body": the full plain-text email, ready to send as-is, ending with my signature. No placeholders like [Your Name] — use my real details. If a fact is genuinely unknown, leave it out rather than bracketing it.
+- "note": one sentence to me on what angle you took and anything I should double-check before sending.`,
+    }),
+    schema: obj({ subject: str, body: str, note: str }),
+  },
+
   // ---------- Self-improvement (Evolve) ----------
   meta_optimize: {
     mode: "json",
