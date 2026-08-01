@@ -47,31 +47,56 @@ export default function InboxPage() {
     setLastSync(store.getLastSync());
   }, []);
 
-  async function sync(full = false) {
+  /**
+   * Pages through everything newer than the cursor. A week away can mean
+   * hundreds of emails, so we keep calling until the backlog is drained
+   * (bounded, and the cursor advances every round so nothing is skipped).
+   */
+  async function sync(full = false, days = 14) {
     setError("");
     setBusy(true);
     setProgress("Connecting to Gmail…");
     try {
-      const since = full ? undefined : store.getLastSync() || undefined;
-      const res = await fetch("/api/inbox/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ since, limit: 40 }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || `Sync failed (${res.status})`);
-        return;
-      }
-      setAccount(data.account || "");
+      let cursor = full ? undefined : store.getLastSync() || undefined;
+      const fresh: InboxMessage[] = [];
+      let leftover = 0;
+      const MAX_ROUNDS = 8; // up to ~320 emails per click
 
-      const fresh: InboxMessage[] = data.messages || [];
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        const res = await fetch("/api/inbox/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ since: cursor, limit: 40, days }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (fresh.length === 0) {
+            setError(data.error || `Sync failed (${res.status})`);
+            return;
+          }
+          break; // keep whatever we already pulled
+        }
+        setAccount(data.account || "");
+        fresh.push(...(data.messages || []));
+        cursor = data.nextSince;
+        store.setLastSync(cursor!); // advance so a later click resumes here
+        leftover = data.remaining || 0;
+
+        if (!leftover) break;
+        setProgress(`Fetched ${fresh.length} emails · ${leftover} older still queued…`);
+      }
+
+      setLastSync(store.getLastSync());
+
       if (!fresh.length) {
-        store.setLastSync(data.syncedAt);
-        setLastSync(data.syncedAt);
         setProgress("");
         setError("No new mail since your last sync.");
         return;
+      }
+      if (leftover > 0) {
+        setError(
+          `Fetched ${fresh.length} emails. ${leftover} older ones are still queued — click Sync again to continue where this left off.`
+        );
       }
 
       // Classify in batches so one huge AI call can't fail everything.
@@ -115,9 +140,7 @@ export default function InboxPage() {
       );
 
       store.setInbox(all);
-      store.setLastSync(data.syncedAt);
       setMessages(all);
-      setLastSync(data.syncedAt);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -178,15 +201,26 @@ export default function InboxPage() {
             reply without leaving this app.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <button className="btn-primary" onClick={() => sync(false)} disabled={busy}>
             {busy ? "Syncing…" : lastSync ? "⟳ Sync new mail" : "⟳ Sync my inbox"}
           </button>
-          {lastSync && (
-            <button className="btn-secondary" onClick={() => sync(true)} disabled={busy}>
-              Last 14 days
-            </button>
-          )}
+          <select
+            className="input w-auto py-2 text-xs"
+            defaultValue="14"
+            disabled={busy}
+            onChange={(e) => {
+              const d = Number(e.target.value);
+              if (d) sync(true, d);
+              e.target.value = "14";
+            }}
+            title="Re-scan a full period, ignoring the sync cursor"
+          >
+            <option value="14">Rescan…</option>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
         </div>
       </div>
 

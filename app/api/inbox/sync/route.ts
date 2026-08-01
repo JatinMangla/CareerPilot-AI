@@ -26,13 +26,18 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => ({}));
   const limit = Math.min(Number(body?.limit) || 40, 80);
+  const days = Math.min(Math.max(Number(body?.days) || 14, 1), 90);
 
-  // Default look-back on first run: 14 days.
-  let since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  // First run looks back `days`; later runs continue from the caller's cursor.
+  let since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   if (body?.since) {
     const d = new Date(body.since);
     if (!isNaN(d.getTime())) since = d;
   }
+  // IMAP SEARCH SINCE has day granularity — widen to the start of that day and
+  // filter precisely by timestamp afterwards.
+  const searchSince = new Date(since);
+  searchSince.setHours(0, 0, 0, 0);
 
   const client = new ImapFlow({
     host: "imap.gmail.com",
@@ -60,15 +65,20 @@ export async function POST(req: Request) {
   }
 
   const messages: any[] = [];
+  let remaining = 0;
   let lock;
   try {
     lock = await client.getMailboxLock("INBOX");
-    const uids = (await client.search({ since }, { uid: true })) || [];
-    const recent = uids.slice(-limit); // newest N
+    const all = (await client.search({ since: searchSince }, { uid: true })) || [];
 
-    if (recent.length) {
+    // Walk FORWARD from the cursor (oldest first) so a long gap drains fully
+    // across successive calls instead of silently dropping older mail.
+    const batch = all.slice(0, limit);
+    remaining = Math.max(0, all.length - batch.length);
+
+    if (batch.length) {
       for await (const msg of client.fetch(
-        recent,
+        batch,
         { uid: true, source: true, envelope: true },
         { uid: true }
       )) {
@@ -107,14 +117,30 @@ export async function POST(req: Request) {
     }
   }
 
-  messages.sort((a, b) => +new Date(b.date) - +new Date(a.date));
+  // Drop anything at or before the exact cursor (day-granular IMAP search can
+  // return earlier mail from the same day).
+  const fresh = messages.filter((m) => +new Date(m.date) > +since);
+  fresh.sort((a, b) => +new Date(b.date) - +new Date(a.date));
+
+  // Cursor for the next page: the newest message we actually took. If this page
+  // was entirely same-day duplicates, nudge forward so we can't loop forever.
+  const newest = messages.reduce(
+    (max, m) => Math.max(max, +new Date(m.date)),
+    +since
+  );
+  const nextSince = new Date(
+    newest > +since ? newest : +since + 1000
+  ).toISOString();
 
   return Response.json({
     ok: true,
     account: user,
     since: since.toISOString(),
+    nextSince,
+    remaining,
+    fetched: fresh.length,
+    scanned: messages.length,
     syncedAt: new Date().toISOString(),
-    count: messages.length,
-    messages,
+    messages: fresh,
   });
 }
