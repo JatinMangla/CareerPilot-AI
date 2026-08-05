@@ -29,6 +29,57 @@ const KEYS = {
   stats: "cp_stats",
 } as const;
 
+/* ------------------------------------------------------------------ *
+ * Cross-device sync
+ *
+ * localStorage stays the instant, synchronous cache so every page keeps
+ * its simple `store.getX()` API. Each write also stamps the key and
+ * schedules a debounced push to the server, and `pull()` merges anything
+ * newer that another device wrote. Last write wins, per key.
+ * ------------------------------------------------------------------ */
+
+const META_KEY = "cp_meta"; // { [key]: lastModified }
+const DEVICE_ONLY = new Set<string>(["cp_outreach_draft", "cp_meta"]);
+
+type SyncState = "off" | "idle" | "syncing" | "error";
+let syncState: SyncState = "off";
+let syncError = "";
+let pushTimer: ReturnType<typeof setTimeout> | null = null;
+const dirty = new Set<string>();
+const listeners = new Set<() => void>();
+
+function notify() {
+  listeners.forEach((fn) => {
+    try {
+      fn();
+    } catch {
+      /* ignore listener errors */
+    }
+  });
+}
+
+function setSyncState(s: SyncState, err = "") {
+  syncState = s;
+  syncError = err;
+  notify();
+}
+
+function readMeta(): Record<string, number> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(META_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function stamp(key: string, at = Date.now()) {
+  if (typeof window === "undefined") return;
+  const meta = readMeta();
+  meta[key] = at;
+  window.localStorage.setItem(META_KEY, JSON.stringify(meta));
+}
+
 function read<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -42,7 +93,133 @@ function read<T>(key: string, fallback: T): T {
 function write<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(key, JSON.stringify(value));
+  if (DEVICE_ONLY.has(key)) return;
+  stamp(key);
+  dirty.add(key);
+  schedulePush();
 }
+
+function schedulePush(delay = 1200) {
+  if (typeof window === "undefined" || syncState === "off") return;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => void push(), delay);
+}
+
+/** Send locally-changed keys to the server. */
+async function push(): Promise<void> {
+  if (typeof window === "undefined" || syncState === "off" || dirty.size === 0) return;
+  const keys = Array.from(dirty);
+  dirty.clear();
+  const meta = readMeta();
+  const data: Record<string, { value: unknown; at: number }> = {};
+  for (const k of keys) {
+    const raw = window.localStorage.getItem(k);
+    if (raw === null) continue;
+    try {
+      data[k] = { value: JSON.parse(raw), at: meta[k] || Date.now() };
+    } catch {
+      /* skip unparseable */
+    }
+  }
+  if (!Object.keys(data).length) return;
+
+  setSyncState("syncing");
+  try {
+    const res = await fetch("/api/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      keys.forEach((k) => dirty.add(k)); // retry on the next write
+      setSyncState("error", d.error || `Sync failed (${res.status})`);
+      return;
+    }
+    setSyncState("idle");
+  } catch (err: any) {
+    keys.forEach((k) => dirty.add(k));
+    setSyncState("error", err.message);
+  }
+}
+
+/**
+ * Pull server state and merge. Returns true if anything local changed, so the
+ * caller can refresh the UI.
+ */
+async function pull(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  setSyncState("syncing");
+  try {
+    const res = await fetch("/api/state", { cache: "no-store" });
+    const payload = await res.json().catch(() => ({}));
+
+    if (!payload?.configured) {
+      setSyncState("off");
+      return false;
+    }
+    if (!res.ok) {
+      setSyncState("error", payload.error || `Sync failed (${res.status})`);
+      return false;
+    }
+
+    const meta = readMeta();
+    const server: Record<string, { value: unknown; at: number }> = payload.data || {};
+    let changed = false;
+
+    for (const [key, entry] of Object.entries(server)) {
+      if (DEVICE_ONLY.has(key)) continue;
+      const localAt = meta[key] ?? -1;
+      if ((entry?.at ?? 0) > localAt) {
+        window.localStorage.setItem(key, JSON.stringify(entry.value));
+        stamp(key, entry.at);
+        changed = true;
+      }
+    }
+
+    // Anything this device has that the server doesn't (or has staler) goes up —
+    // this is what carries an existing browser's data into the database.
+    for (const [key, at] of Object.entries(readMeta())) {
+      if (DEVICE_ONLY.has(key)) continue;
+      if (!server[key] || (server[key].at ?? 0) < at) dirty.add(key);
+    }
+
+    setSyncState("idle");
+    if (dirty.size) await push();
+    return changed;
+  } catch (err: any) {
+    setSyncState("error", err.message);
+    return false;
+  }
+}
+
+export const sync = {
+  /** Called once on app start. */
+  init: pull,
+  pushNow: () => push(),
+  getState: () => ({ state: syncState, error: syncError }),
+  subscribe(fn: () => void) {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  },
+  /**
+   * First run on a device that already has local data: make sure every key is
+   * stamped so it gets uploaded rather than silently ignored.
+   */
+  stampExistingLocalData() {
+    if (typeof window === "undefined") return;
+    const meta = readMeta();
+    let touched = false;
+    for (const key of Object.values(KEYS)) {
+      if (DEVICE_ONLY.has(key)) continue;
+      if (window.localStorage.getItem(key) !== null && meta[key] === undefined) {
+        meta[key] = Date.now();
+        touched = true;
+      }
+    }
+    if (touched) window.localStorage.setItem(META_KEY, JSON.stringify(meta));
+  },
+};
 
 export const defaultProfile: Profile = {
   name: "Jatin Mangla",

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import UsageBanner from "./UsageBanner";
+import SyncProvider, { SyncBadge } from "./SyncProvider";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: "◆" },
@@ -24,10 +25,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-
-  if (pathname === "/login") {
-    return <>{children}</>;
-  }
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -59,7 +56,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     </nav>
   );
 
+  if (pathname === "/login") {
+    return <>{children}</>;
+  }
+
   return (
+    <SyncProvider>
     <div className="min-h-screen md:flex">
       {/* Sidebar (desktop) */}
       <aside className="hidden md:flex md:flex-col w-64 shrink-0 border-r border-ink-800 bg-ink-900/60 backdrop-blur-sm p-4 sticky top-0 h-screen">
@@ -72,7 +74,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </span>
         </Link>
         {nav}
-        <div className="mt-auto pt-4 border-t border-ink-800">
+        <div className="mt-auto pt-4 border-t border-ink-800 space-y-1">
+          <SyncBadge />
           <button onClick={logout} className="btn-secondary w-full text-xs">
             Sign out
           </button>
@@ -102,8 +105,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
       <main className="flex-1 min-w-0 p-4 md:p-8 max-w-6xl">
         <UsageBanner />
+        <div className="md:hidden mb-3">
+          <SyncBadge />
+        </div>
         {children}
       </main>
     </div>
+    </SyncProvider>
   );
 }
