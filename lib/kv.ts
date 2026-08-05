@@ -79,6 +79,11 @@ export async function writeFields(fields: Record<string, string>): Promise<void>
   await pipeline(entries.map(([k, v]) => ["HSET", HASH, k, v]));
 }
 
+/** Removes a single stored key. */
+export async function deleteField(field: string): Promise<number> {
+  return (await command(["HDEL", HASH, field])) as number;
+}
+
 export async function clearAll(): Promise<void> {
   await command(["DEL", HASH]);
 }

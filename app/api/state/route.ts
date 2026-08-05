@@ -1,4 +1,4 @@
-import { kvConfigured, readAll, writeFields } from "@/lib/kv";
+import { kvConfigured, readAll, writeFields, deleteField } from "@/lib/kv";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -41,6 +41,23 @@ export async function GET() {
     return Response.json({ configured: true, data });
   } catch (err: any) {
     return Response.json({ configured: true, error: err.message }, { status: 502 });
+  }
+}
+
+/** Removes one key from cloud storage: DELETE /api/state?key=cp_jobs */
+export async function DELETE(req: Request) {
+  if (!kvConfigured()) {
+    return Response.json({ error: "No database connected." }, { status: 503 });
+  }
+  const key = new URL(req.url).searchParams.get("key");
+  if (!key) {
+    return Response.json({ error: "A ?key= parameter is required." }, { status: 400 });
+  }
+  try {
+    const removed = await deleteField(key);
+    return Response.json({ ok: true, removed });
+  } catch (err: any) {
+    return Response.json({ error: err.message }, { status: 502 });
   }
 }
 
