@@ -105,14 +105,12 @@ function schedulePush(delay = 1200) {
   pushTimer = setTimeout(() => void push(), delay);
 }
 
-/** Send locally-changed keys to the server. */
-async function push(): Promise<void> {
-  if (typeof window === "undefined" || syncState === "off" || dirty.size === 0) return;
-  const keys = Array.from(dirty);
-  dirty.clear();
+/** Collects the pending changes as a payload, without clearing them. */
+function pendingPayload(): Record<string, { value: unknown; at: number }> | null {
+  if (typeof window === "undefined" || dirty.size === 0) return null;
   const meta = readMeta();
   const data: Record<string, { value: unknown; at: number }> = {};
-  for (const k of keys) {
+  for (const k of Array.from(dirty)) {
     const raw = window.localStorage.getItem(k);
     if (raw === null) continue;
     try {
@@ -121,7 +119,48 @@ async function push(): Promise<void> {
       /* skip unparseable */
     }
   }
-  if (!Object.keys(data).length) return;
+  return Object.keys(data).length ? data : null;
+}
+
+/**
+ * Last-gasp save when the page is being hidden or torn down.
+ *
+ * iOS Safari frequently kills in-flight fetches (and often skips `beforeunload`
+ * entirely) when you swipe away or switch apps, so a normal push can be lost.
+ * sendBeacon is queued by the browser and delivered regardless.
+ */
+function flushBeacon(): void {
+  if (typeof window === "undefined" || syncState === "off") return;
+  const data = pendingPayload();
+  if (!data) return;
+  const body = JSON.stringify({ data });
+  try {
+    const blob = new Blob([body], { type: "application/json" });
+    if (navigator.sendBeacon?.("/api/state", blob)) {
+      dirty.clear();
+      return;
+    }
+  } catch {
+    /* fall through to keepalive fetch */
+  }
+  // keepalive lets the request outlive the page in browsers without sendBeacon
+  fetch("/api/state", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: true,
+  })
+    .then(() => dirty.clear())
+    .catch(() => {});
+}
+
+/** Send locally-changed keys to the server. */
+async function push(): Promise<void> {
+  if (typeof window === "undefined" || syncState === "off" || dirty.size === 0) return;
+  const keys = Array.from(dirty);
+  const data = pendingPayload();
+  dirty.clear();
+  if (!data) return;
 
   setSyncState("syncing");
   try {
@@ -193,10 +232,20 @@ async function pull(): Promise<boolean> {
   }
 }
 
+let lastPullAt = 0;
+
 export const sync = {
   /** Called once on app start. */
   init: pull,
+  /** Pull, but skip if we just did — for rapid tab/app switching. */
+  refresh: async () => {
+    if (Date.now() - lastPullAt < 8000) return false;
+    lastPullAt = Date.now();
+    return pull();
+  },
   pushNow: () => push(),
+  /** Save immediately and durably; safe to call while the page is closing. */
+  flush: flushBeacon,
   getState: () => ({ state: syncState, error: syncError }),
   subscribe(fn: () => void) {
     listeners.add(fn);

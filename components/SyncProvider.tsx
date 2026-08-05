@@ -31,16 +31,26 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
         finish();
       });
 
-    // Push anything pending when leaving or backgrounding the tab.
-    const flush = () => void sync.pushNow();
-    window.addEventListener("beforeunload", flush);
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") flush();
-      if (document.visibilityState === "visible") void sync.init();
-    });
+    // Save on the way out, and pick up other devices' changes on the way in.
+    // iOS fires pagehide/visibilitychange reliably; beforeunload often not at all.
+    const onHide = () => sync.flush();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") sync.flush();
+      else void sync.refresh();
+    };
+    const onFocus = () => void sync.refresh();
+
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("beforeunload", onHide);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       clearTimeout(guard);
-      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("beforeunload", onHide);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
