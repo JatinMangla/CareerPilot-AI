@@ -161,9 +161,15 @@ Output ONLY the final tailored resume in clean plain text (section headers in CA
   find_jobs: {
     mode: "json",
     maxTokens: 16000,
-    build: ({ resume, profile, count }) => ({
+    build: ({ resume, profile, count, focus }) => ({
       system: SYSTEM_BASE,
-      user: `Based on my resume and profile, list ${count || 8} realistic, currently-plausible job openings that fit me (companies actively hiring frontend/React developers in India or remote — use well-known companies and typical current openings).
+      user: `Based on my resume and profile, list ${count || 8} realistic, currently-plausible job openings that fit me.
+
+${
+  focus === "yc"
+    ? `IMPORTANT — restrict this to Y Combinator-backed startups only. Use real YC companies (any batch) that plausibly hire frontend/React engineers, favouring ones that hire remotely or in India. For "url", give their Work at a Startup listing (https://www.workatastartup.com/companies/<company-slug>) or the company's own careers page — YC startups almost always use Ashby, Greenhouse or Lever. In "pros"/"cons" be honest about startup reality: equity vs cash, scope vs stability, and whether they realistically hire from India.`
+    : `Use companies actively hiring frontend/React developers in India or remote — well-known companies and typical current openings.`
+}
 
 <resume>
 ${resume}

@@ -18,6 +18,8 @@ export type AtsKind =
   | "smartrecruiters"
   | "recruitee"
   | "workday"
+  | "workatastartup"
+  | "ycombinator"
   | "portal"
   | "unknown";
 
@@ -76,6 +78,24 @@ export function detectAts(rawUrl: string): AtsInfo {
       autoSubmit: true,
       autoFill: true,
       note: "Standard form — fully automatable.",
+    };
+
+  if (url.includes("workatastartup.com"))
+    return {
+      kind: "workatastartup",
+      label: "YC · Work at a Startup",
+      autoSubmit: false,
+      autoFill: true,
+      note: "YC's own board needs a signed-in account and sends a personal message to the founder — the agent fills what it can, you review and send.",
+    };
+
+  if (url.includes("ycombinator.com"))
+    return {
+      kind: "ycombinator",
+      label: "Y Combinator",
+      autoSubmit: false,
+      autoFill: true,
+      note: "YC listings usually hand off to the company's own ATS (Ashby/Greenhouse/Lever) — open it and the real application URL is auto-submittable.",
     };
 
   if (url.includes("ashbyhq.com"))

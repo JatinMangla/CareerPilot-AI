@@ -21,16 +21,23 @@ interface Listing {
 }
 
 export async function POST(req: Request) {
-  const { query, location } = await req.json().catch(() => ({ query: "", location: "" }));
+  const { query, location, focus } = await req
+    .json()
+    .catch(() => ({ query: "", location: "", focus: "" }));
   const q = (query || "react frontend developer").trim();
   const loc = (location || "India").trim();
+  // Note: job aggregators can't filter by investor — postings never say
+  // "Y Combinator" — so YC discovery is handled by AI research on the client,
+  // not here. `focus` is accepted for API symmetry only.
+  void focus;
+  const searchTerm = q;
 
   // ---------- 1. OpenWeb Ninja JSearch ----------
   const owKey = process.env.OPENWEBNINJA_API_KEY;
   if (owKey) {
     try {
       const url = `https://api.openwebninja.com/jsearch/search-v2?query=${encodeURIComponent(
-        `${q} jobs in ${loc}`
+        `${searchTerm} jobs in ${loc}`
       )}`;
       const res = await fetch(url, {
         headers: { "X-API-Key": owKey },
@@ -72,7 +79,7 @@ export async function POST(req: Request) {
         app_id: appId,
         app_key: appKey,
         results_per_page: "10",
-        what: q,
+        what: searchTerm,
       });
       if (loc && loc.toLowerCase() !== "india") params.set("where", loc);
       const res = await fetch(

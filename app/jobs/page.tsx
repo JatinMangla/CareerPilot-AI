@@ -11,6 +11,7 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [query, setQuery] = useState("react frontend developer");
   const [location, setLocation] = useState("India");
+  const [focus, setFocus] = useState<"all" | "yc">("all");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -27,13 +28,17 @@ export default function JobsPage() {
     setError("");
     setBusy(true);
     try {
-      // 1) try real listings (Adzuna) if configured
-      setStatus("Checking live job APIs…");
-      const live = await fetch("/api/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, location }),
-      }).then((r) => r.json());
+      // Job aggregators can't filter by investor, so YC discovery goes straight
+      // to AI research rather than returning an empty live result.
+      let live: any = { available: false, listings: [] };
+      if (focus !== "yc") {
+        setStatus("Checking live job APIs…");
+        live = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, location, focus }),
+        }).then((r) => r.json());
+      }
 
       let result: { jobs: Job[] };
       if (live.available && live.listings?.length) {
@@ -46,11 +51,16 @@ export default function JobsPage() {
           resume: resume.text,
         });
       } else {
-        setStatus("Live API not configured — AI is researching matching openings…");
+        setStatus(
+          focus === "yc"
+            ? "Researching Y Combinator startups hiring for your profile…"
+            : "Live API not configured — AI is researching matching openings…"
+        );
         result = await jsonTask<{ jobs: Job[] }>("find_jobs", {
           resume: resume.text,
           profile: store.getProfile(),
           count: 8,
+          focus,
         });
       }
       store.setJobs(result.jobs);
@@ -86,7 +96,48 @@ export default function JobsPage() {
         <button className="btn-primary" onClick={findJobs} disabled={busy || !hasResume}>
           {busy ? "Matching…" : "◎ Find my matches"}
         </button>
+        <div className="w-full flex items-center gap-2 pt-1">
+          <span className="text-xs text-ink-400">Source:</span>
+          {([
+            { k: "all", label: "All companies" },
+            { k: "yc", label: "🟠 Y Combinator startups" },
+          ] as const).map((o) => (
+            <button
+              key={o.k}
+              onClick={() => setFocus(o.k)}
+              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold border transition ${
+                focus === o.k
+                  ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
+                  : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {focus === "yc" && (
+        <div className="text-xs text-ink-300 bg-amberx-500/10 border border-amberx-500/25 rounded-xl px-4 py-3 leading-relaxed">
+          <b className="text-amberx-400">Y Combinator mode.</b> YC startups mostly run on
+          Ashby, Greenhouse or Lever — the same ATS platforms{" "}
+          <Link href="/autopilot" className="underline">
+            Auto-Pilot
+          </Link>{" "}
+          submits automatically, so these are the easiest roles to apply to at volume.
+          Their own board (
+          <a
+            href="https://www.workatastartup.com/jobs"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            Work at a Startup
+          </a>
+          ) needs a free account and a short note to the founder — worth doing manually,
+          since founders read those personally.
+        </div>
+      )}
 
       {!hasResume && (
         <div className="card-pad text-sm text-ink-300">

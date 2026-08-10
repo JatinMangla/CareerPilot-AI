@@ -6,11 +6,21 @@ import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import type { Job, PreparedApplication, Profile } from "@/lib/types";
 
-const ALL_PORTALS = ["LinkedIn", "Naukri", "Indeed", "Wellfound", "Instahyre", "Cutshort"];
+const ALL_PORTALS = [
+  "Y Combinator",
+  "LinkedIn",
+  "Naukri",
+  "Indeed",
+  "Wellfound",
+  "Instahyre",
+  "Cutshort",
+];
 
 function portalSearchUrl(portal: string, job: Job): string {
   const q = encodeURIComponent(`${job.title} ${job.company}`);
   switch (portal) {
+    case "Y Combinator":
+      return `https://www.workatastartup.com/jobs?query=${encodeURIComponent(job.title)}`;
     case "LinkedIn":
       return `https://www.linkedin.com/jobs/search/?keywords=${q}`;
     case "Naukri":
