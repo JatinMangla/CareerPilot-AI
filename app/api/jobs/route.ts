@@ -1,3 +1,5 @@
+import { searchCompanyBoards } from "@/lib/companyBoards";
+
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -26,11 +28,39 @@ export async function POST(req: Request) {
     .catch(() => ({ query: "", location: "", focus: "" }));
   const q = (query || "react frontend developer").trim();
   const loc = (location || "India").trim();
-  // Note: job aggregators can't filter by investor — postings never say
-  // "Y Combinator" — so YC discovery is handled by AI research on the client,
-  // not here. `focus` is accepted for API symmetry only.
-  void focus;
   const searchTerm = q;
+
+  // ---------- 0. Company ATS boards (best source: first-party & free) ----------
+  // Greenhouse/Lever/Ashby publish each company's live openings as public JSON.
+  // No key, no account — and the apply URLs are exactly what Auto-Pilot can submit.
+  if (focus === "boards" || focus === "yc") {
+    try {
+      const listings = await searchCompanyBoards({
+        query: q,
+        location: loc,
+        ycOnly: focus === "yc",
+        limit: 25,
+      });
+      if (listings.length) {
+        return Response.json({
+          available: true,
+          source: focus === "yc" ? "yc-boards" : "company-boards",
+          listings: listings.map((j) => ({
+            id: j.id,
+            title: j.title,
+            company: j.company,
+            location: j.location,
+            salary: "",
+            url: j.url,
+            description: "",
+            source: focus === "yc" ? "yc-boards" : "company-boards",
+          })),
+        });
+      }
+    } catch {
+      /* fall through to the aggregators below */
+    }
+  }
 
   // ---------- 1. OpenWeb Ninja JSearch ----------
   const owKey = process.env.OPENWEBNINJA_API_KEY;

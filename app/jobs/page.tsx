@@ -11,7 +11,7 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [query, setQuery] = useState("react frontend developer");
   const [location, setLocation] = useState("India");
-  const [focus, setFocus] = useState<"all" | "yc">("all");
+  const [focus, setFocus] = useState<"all" | "boards" | "yc">("boards");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -28,17 +28,16 @@ export default function JobsPage() {
     setError("");
     setBusy(true);
     try {
-      // Job aggregators can't filter by investor, so YC discovery goes straight
-      // to AI research rather than returning an empty live result.
-      let live: any = { available: false, listings: [] };
-      if (focus !== "yc") {
-        setStatus("Checking live job APIs…");
-        live = await fetch("/api/jobs", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, location, focus }),
-        }).then((r) => r.json());
-      }
+      setStatus(
+        focus === "all"
+          ? "Checking live job APIs…"
+          : "Reading company career boards (Greenhouse / Lever / Ashby)…"
+      );
+      const live = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, location, focus }),
+      }).then((r) => r.json());
 
       let result: { jobs: Job[] };
       if (live.available && live.listings?.length) {
@@ -99,8 +98,9 @@ export default function JobsPage() {
         <div className="w-full flex items-center gap-2 pt-1">
           <span className="text-xs text-ink-400">Source:</span>
           {([
-            { k: "all", label: "All companies" },
-            { k: "yc", label: "🟠 Y Combinator startups" },
+            { k: "boards", label: "🏢 Company boards (live)" },
+            { k: "yc", label: "🟠 Y Combinator" },
+            { k: "all", label: "🌐 All job sites" },
           ] as const).map((o) => (
             <button
               key={o.k}
@@ -117,25 +117,34 @@ export default function JobsPage() {
         </div>
       </div>
 
-      {focus === "yc" && (
-        <div className="text-xs text-ink-300 bg-amberx-500/10 border border-amberx-500/25 rounded-xl px-4 py-3 leading-relaxed">
-          <b className="text-amberx-400">Y Combinator mode.</b> YC startups mostly run on
-          Ashby, Greenhouse or Lever — the same ATS platforms{" "}
+      {focus !== "all" && (
+        <div className="text-xs text-ink-300 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3 leading-relaxed">
+          <b className="text-neon-400">
+            {focus === "yc" ? "Y Combinator companies." : "Company career boards."}
+          </b>{" "}
+          Read straight from each company&apos;s own Greenhouse / Lever / Ashby board —
+          first-party listings, always current, and no account needed. Best of all, these
+          apply links are exactly what{" "}
           <Link href="/autopilot" className="underline">
             Auto-Pilot
           </Link>{" "}
-          submits automatically, so these are the easiest roles to apply to at volume.
-          Their own board (
-          <a
-            href="https://www.workatastartup.com/jobs"
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
-            Work at a Startup
-          </a>
-          ) needs a free account and a short note to the founder — worth doing manually,
-          since founders read those personally.
+          can submit automatically.
+          {focus === "yc" && (
+            <>
+              {" "}
+              YC&apos;s own board (
+              <a
+                href="https://www.workatastartup.com/jobs"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Work at a Startup
+              </a>
+              ) needs a free account and a note the founder reads personally — worth doing
+              by hand.
+            </>
+          )}
         </div>
       )}
 
