@@ -6,9 +6,28 @@
 
 type TaskMode = "stream" | "json";
 
+/**
+ * Cost tier. Mechanical tasks don't need a frontier model at full effort —
+ * routing them down is the difference between a few dollars a month and a few
+ * dollars a day.
+ *
+ *   fast     — classification, short answers, judging
+ *   standard — most work (default)
+ *   deep     — the writing that actually goes in front of an employer
+ */
+export type TaskTier = "fast" | "standard" | "deep";
+
+export const TIERS: Record<TaskTier, { model: string; effort: "low" | "medium" | "high" }> = {
+  fast: { model: "claude-sonnet-5", effort: "low" },
+  standard: { model: "claude-sonnet-5", effort: "medium" },
+  deep: { model: "claude-opus-4-8", effort: "high" },
+};
+
 export interface TaskDef {
   mode: TaskMode;
   maxTokens?: number;
+  /** Defaults to "standard" when unset. */
+  tier?: TaskTier;
   build: (input: Record<string, any>) => { system: string; user: string };
   schema?: Record<string, any>;
 }
@@ -56,6 +75,7 @@ export const tasks: Record<string, TaskDef> = {
   // ---------- Resume improvement (streamed text) ----------
   improve_resume: {
     mode: "stream",
+    tier: "deep", // this text goes in front of employers
     maxTokens: 32000,
     build: ({ resume, profile, instructions }) => ({
       system: SYSTEM_BASE,
@@ -134,6 +154,7 @@ Produce:
 
   apply_tailor: {
     mode: "stream",
+    tier: "deep",
     maxTokens: 32000,
     build: ({ resume, jobDescription, acceptedChanges, answers }) => ({
       system: SYSTEM_BASE,
@@ -207,6 +228,7 @@ Return the same jobs enriched: keep id/title/company/location/url/description/so
   // ---------- Auto-Pilot: tailor with an approval gate ----------
   auto_tailor: {
     mode: "json",
+    tier: "deep", // may be submitted without further review
     maxTokens: 20000,
     build: ({ resume, job, profile }) => ({
       system: `${SYSTEM_BASE}
@@ -267,6 +289,7 @@ Produce:
 
   merge_claims: {
     mode: "stream",
+    tier: "deep",
     maxTokens: 20000,
     build: ({ resume, approvedClaims, answers }) => ({
       system: SYSTEM_BASE,
@@ -319,6 +342,7 @@ Produce:
   // ---------- Mock interview ----------
   interview_turn: {
     mode: "stream",
+    tier: "fast", // one short question per turn, latency matters
     maxTokens: 4000,
     build: ({ mode, history, resume, stage }) => ({
       system: `${SYSTEM_BASE}
@@ -361,6 +385,7 @@ Give me a frank performance report:
   // ---------- Practice (LeetCode-style, frontend-focused) ----------
   practice_question: {
     mode: "json",
+    tier: "fast",
     maxTokens: 6000,
     build: ({ topic, difficulty, seen }) => ({
       system: SYSTEM_BASE,
@@ -457,7 +482,8 @@ Return:
   // ---------- Inbox triage ----------
   classify_inbox: {
     mode: "json",
-    maxTokens: 16000,
+    tier: "fast", // bucketing email; runs ~27× per sync
+    maxTokens: 8000,
     build: ({ emails, profile }) => ({
       system: `${SYSTEM_BASE}
 

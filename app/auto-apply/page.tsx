@@ -66,8 +66,19 @@ export default function AutoApplyPage() {
   async function prepareSelected() {
     const resume = store.getResume();
     if (!resume?.text) return setError("Add your resume first.");
-    const targets = jobs.filter((j) => selected[j.id] && !apps.some((a) => a.jobId === j.id));
-    if (targets.length === 0) return setError("Select at least one job (not already prepared).");
+    const picked = jobs.filter((j) => selected[j.id] && !apps.some((a) => a.jobId === j.id));
+    if (picked.length === 0) return setError("Select at least one job (not already prepared).");
+
+    const MAX_PER_RUN = 10;
+    let targets = picked;
+    if (picked.length > MAX_PER_RUN) {
+      const ok = window.confirm(
+        `You selected ${picked.length} jobs, each a separate AI call.\n\n` +
+          `Continue with the first ${MAX_PER_RUN}? (Run again for the rest.)`
+      );
+      if (!ok) return;
+      targets = picked.slice(0, MAX_PER_RUN);
+    }
     setError("");
     setBusy(true);
     const portal = profile?.portals[0] || "LinkedIn";

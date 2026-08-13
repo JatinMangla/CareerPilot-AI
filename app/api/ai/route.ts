@@ -1,11 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { tasks } from "@/lib/prompts";
+import { tasks, TIERS } from "@/lib/prompts";
 import { geminiText, geminiJson } from "@/lib/gemini";
+import { getSpend, recordSpend } from "@/lib/spend";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel clamps to plan limit
-
-const MODEL = "claude-opus-4-8";
 
 export async function POST(req: Request) {
   const provider = process.env.ANTHROPIC_API_KEY
@@ -63,41 +62,66 @@ export async function POST(req: Request) {
     }
 
     // ---------- Primary provider (Claude) ----------
+    // Hard stop before spending anything more today.
+    const spend = await getSpend();
+    if (spend.exceeded) {
+      return Response.json(
+        {
+          error:
+            `Daily AI budget reached ($${spend.spentUsd.toFixed(2)} of $${spend.limitUsd.toFixed(2)} across ${spend.calls} calls). ` +
+            `It resets at midnight UTC. Raise AI_DAILY_USD_LIMIT if you need more today.`,
+        },
+        { status: 429 }
+      );
+    }
+
+    const { model, effort } = TIERS[def.tier ?? "standard"];
     const client = new Anthropic();
+
     if (def.mode === "json") {
       const response = (await client.messages.create({
-        model: MODEL,
+        model,
         max_tokens: def.maxTokens ?? 8000,
         thinking: { type: "adaptive" },
-        system: systemPrompt,
-        messages: [{ role: "user", content: user }],
         output_config: {
+          effort,
           format: { type: "json_schema", schema: def.schema },
         },
+        system: systemPrompt,
+        messages: [{ role: "user", content: user }],
       } as Anthropic.MessageCreateParamsNonStreaming)) as Anthropic.Message;
+
+      await recordSpend(
+        model,
+        response.usage?.input_tokens ?? 0,
+        response.usage?.output_tokens ?? 0
+      );
 
       const text = response.content.find(
         (b): b is Anthropic.TextBlock => b.type === "text"
       )?.text;
       if (!text) {
+        console.error("[ai] empty response", { task: body.task, model });
         return Response.json({ error: "Empty AI response" }, { status: 502 });
       }
       return new Response(text, {
         headers: {
           "Content-Type": "application/json; charset=utf-8",
           "x-ai-provider": "anthropic",
+          "x-ai-model": model,
         },
       });
     }
 
     // stream mode — plain text chunks
     const stream = client.messages.stream({
-      model: MODEL,
+      model,
       max_tokens: def.maxTokens ?? 32000,
       thinking: { type: "adaptive" },
+      output_config: { effort },
       system: systemPrompt,
       messages: [{ role: "user", content: user }],
-    });
+    } as Anthropic.MessageStreamParams);
 
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
@@ -111,7 +135,15 @@ export async function POST(req: Request) {
               controller.enqueue(encoder.encode(event.delta.text));
             }
           }
+          // Usage is only final once the stream completes.
+          const final = await stream.finalMessage();
+          await recordSpend(
+            model,
+            final.usage?.input_tokens ?? 0,
+            final.usage?.output_tokens ?? 0
+          );
         } catch (err: any) {
+          console.error("[ai] stream failed", { task: body.task, model, err: err?.message });
           controller.enqueue(
             encoder.encode(`\n\n[AI stream error: ${err?.message || "unknown"}]`)
           );
@@ -124,6 +156,7 @@ export async function POST(req: Request) {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "x-ai-provider": "anthropic",
+        "x-ai-model": model,
       },
     });
   } catch (err: any) {

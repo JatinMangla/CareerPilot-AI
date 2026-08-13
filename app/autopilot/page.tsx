@@ -30,10 +30,23 @@ export default function AutoPilotPage() {
   async function prepareSelected() {
     const resume = store.getResume();
     if (!resume?.text) return setError("Add your resume first on the My Resume page.");
-    const targets = jobs.filter(
+    const picked = jobs.filter(
       (j) => selected[j.id] && !queue.some((q) => q.jobId === j.id)
     );
-    if (!targets.length) return setError("Select at least one job that isn't queued yet.");
+    if (!picked.length) return setError("Select at least one job that isn't queued yet.");
+
+    // Each job is one deep-tier AI call. Cap the run so a stray click can't
+    // spend a day's budget in one go.
+    const MAX_PER_RUN = 10;
+    let targets = picked;
+    if (picked.length > MAX_PER_RUN) {
+      const ok = window.confirm(
+        `You selected ${picked.length} jobs. Each one is a full AI tailoring pass.\n\n` +
+          `Continue with the first ${MAX_PER_RUN}? (Run again for the rest.)`
+      );
+      if (!ok) return;
+      targets = picked.slice(0, MAX_PER_RUN);
+    }
 
     setError("");
     setBusy(true);

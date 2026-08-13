@@ -56,7 +56,22 @@ async function pipeline(cmds: (string | number)[][]): Promise<any[]> {
   if (!res.ok) {
     throw new Error(`KV error ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
-  return res.json();
+
+  // Upstash returns HTTP 200 with a per-command result array — an individual
+  // command can carry {error} while the envelope looks fine. Without this check
+  // a failed write is reported all the way up the stack as a success.
+  const results = await res.json();
+  if (Array.isArray(results)) {
+    const failed = results.filter((r) => r && typeof r === "object" && r.error);
+    if (failed.length) {
+      throw new Error(
+        `KV write failed for ${failed.length}/${results.length} command(s): ${String(
+          failed[0].error
+        ).slice(0, 200)}`
+      );
+    }
+  }
+  return results;
 }
 
 /** Every stored key → its raw JSON string. */
@@ -82,6 +97,33 @@ export async function writeFields(fields: Record<string, string>): Promise<void>
 /** Removes a single stored key. */
 export async function deleteField(field: string): Promise<number> {
   return (await command(["HDEL", HASH, field])) as number;
+}
+
+/* ---------- generic helpers (used by the spend counter) ---------- */
+
+/** HGETALL on an arbitrary hash, returned as a flat string map. */
+export async function hgetallRaw(key: string): Promise<Record<string, string>> {
+  const flat = await command(["HGETALL", key]);
+  const out: Record<string, string> = {};
+  if (Array.isArray(flat)) {
+    for (let i = 0; i < flat.length; i += 2) out[String(flat[i])] = String(flat[i + 1]);
+  } else if (flat && typeof flat === "object") {
+    for (const [k, v] of Object.entries(flat)) out[k] = String(v);
+  }
+  return out;
+}
+
+/** Atomically increments several float fields of a hash. */
+export async function hincrbyFloat(
+  key: string,
+  fields: [string, number][]
+): Promise<void> {
+  if (!fields.length) return;
+  await pipeline(fields.map(([f, by]) => ["HINCRBYFLOAT", key, f, by]));
+}
+
+export async function expire(key: string, seconds: number): Promise<void> {
+  await command(["EXPIRE", key, seconds]);
 }
 
 export async function clearAll(): Promise<void> {
