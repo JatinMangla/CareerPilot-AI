@@ -2,15 +2,15 @@
 
 Personal AI career copilot for Jatin Mangla — resume improvement, industry-standard
 validation, job-tailoring (with approval flow), job matching with pros/cons analysis,
-auto-apply pipeline, mock interviews (oral / video / text), coding practice, and a
-self-evolving AI strategy. Powered by Claude (Anthropic).
+auto-apply pipeline, Gmail job-inbox triage, HR outreach, mock interviews
+(oral / video / text), coding practice, and a self-evolving AI strategy.
 
 ## Stack
 
 - Next.js 14 (App Router) + TypeScript + Tailwind CSS
 - Backend = Next.js API routes (deploys as serverless functions on Vercel — no separate backend needed)
-- Claude Opus 4.8 via `@anthropic-ai/sdk` (adaptive thinking, streaming, structured outputs)
-- Single-user auth (HMAC-signed cookie), data stored in your browser (localStorage)
+- Google Gemini (free tier) with per-task model tiers, schema-enforced JSON and SSE streaming
+- Single-user auth (HMAC-signed cookie), state synced across devices via Upstash Redis
 
 ## Run locally
 
@@ -34,14 +34,16 @@ vercel --prod         # production deploy
 
 Then in the Vercel dashboard → Project → Settings → Environment Variables, add:
 
-| Name                | Value                              |
-| ------------------- | ---------------------------------- |
-| `ANTHROPIC_API_KEY` | your Claude API key                |
-| `AUTH_EMAIL`        | jatinmangla123@gmail.com           |
-| `AUTH_PASSWORD`     | a strong password                  |
-| `AUTH_SECRET`       | any long random string             |
-| `ADZUNA_APP_ID`     | (optional) for live job listings   |
-| `ADZUNA_APP_KEY`    | (optional)                         |
+| Name                                             | Value                                          |
+| ------------------------------------------------ | ---------------------------------------------- |
+| `GEMINI_API_KEY`                                  | free key from aistudio.google.com/apikey       |
+| `AUTH_EMAIL`                                      | jatinmangla123@gmail.com                       |
+| `AUTH_PASSWORD`                                   | a strong password                              |
+| `AUTH_SECRET`                                     | any long random string                         |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN`               | cross-device sync (or Vercel's `KV_REST_API_*`)|
+| `GMAIL_USER` / `GMAIL_APP_PASSWORD`               | Job Inbox + HR Outreach                        |
+| `RESEND_API_KEY`                                  | (optional) emailed login codes                 |
+| `OPENWEBNINJA_API_KEY`, `ADZUNA_APP_ID` / `_KEY`  | (optional) wider job aggregator coverage       |
 
 Redeploy after adding env vars (`vercel --prod`).
 

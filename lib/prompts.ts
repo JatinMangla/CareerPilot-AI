@@ -7,21 +7,13 @@
 type TaskMode = "stream" | "json";
 
 /**
- * Cost tier. Mechanical tasks don't need a frontier model at full effort —
- * routing them down is the difference between a few dollars a month and a few
- * dollars a day.
+ * Quality tier — selects the model and thinking budget in lib/gemini.ts.
  *
- *   fast     — classification, short answers, judging
+ *   fast     — classification, judging, short interview turns
  *   standard — most work (default)
  *   deep     — the writing that actually goes in front of an employer
  */
 export type TaskTier = "fast" | "standard" | "deep";
-
-export const TIERS: Record<TaskTier, { model: string; effort: "low" | "medium" | "high" }> = {
-  fast: { model: "claude-sonnet-5", effort: "low" },
-  standard: { model: "claude-sonnet-5", effort: "medium" },
-  deep: { model: "claude-opus-4-8", effort: "high" },
-};
 
 export interface TaskDef {
   mode: TaskMode;

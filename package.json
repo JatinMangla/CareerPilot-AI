@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "latest",
     "@react-pdf/renderer": "^4.5.1",
     "@types/nodemailer": "^8.0.1",
     "imapflow": "^1.6.5",

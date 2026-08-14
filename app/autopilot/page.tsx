@@ -36,7 +36,7 @@ export default function AutoPilotPage() {
     if (!picked.length) return setError("Select at least one job that isn't queued yet.");
 
     // Each job is one deep-tier AI call. Cap the run so a stray click can't
-    // spend a day's budget in one go.
+    // burn the day's free quota in one go.
     const MAX_PER_RUN = 10;
     let targets = picked;
     if (picked.length > MAX_PER_RUN) {

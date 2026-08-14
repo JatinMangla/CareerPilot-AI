@@ -3,18 +3,16 @@
 import { store } from "./store";
 import { quota } from "./quota";
 
+// Gemini's free tier is the only provider, so the daily cap always applies.
+// This is a courtesy stop so you find out before Google starts refusing calls —
+// it lives in localStorage and is not a security control.
 function preGuard() {
-  // Only guard the free tier — if the server last used Claude, no limit applies here.
-  if (typeof window !== "undefined" && window.localStorage.getItem("cp_last_provider") === "gemini") {
-    quota.guard("gemini");
-  }
+  if (typeof window !== "undefined") quota.guard("gemini");
 }
 
 function trackProvider(res: Response) {
-  const provider = res.headers.get("x-ai-provider");
-  if (!provider || typeof window === "undefined") return;
-  window.localStorage.setItem("cp_last_provider", provider);
-  if (provider === "gemini") quota.bump("gemini");
+  if (typeof window === "undefined") return;
+  if (res.headers.get("x-ai-provider") === "gemini") quota.bump("gemini");
 }
 
 /**

@@ -99,7 +99,7 @@ export async function deleteField(field: string): Promise<number> {
   return (await command(["HDEL", HASH, field])) as number;
 }
 
-/* ---------- generic helpers (used by the spend counter) ---------- */
+/* ---------- generic hash helpers ---------- */
 
 /** HGETALL on an arbitrary hash, returned as a flat string map. */
 export async function hgetallRaw(key: string): Promise<Record<string, string>> {
