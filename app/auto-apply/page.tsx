@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
-import type { Job, PreparedApplication, Profile } from "@/lib/types";
+import { OUTCOME_STAGES, type Job, type OutcomeStage, type PreparedApplication, type Profile } from "@/lib/types";
 
 const ALL_PORTALS = [
   "Y Combinator",
@@ -117,8 +117,26 @@ export default function AutoApplyPage() {
   }
 
   function markApplied(jobId: string) {
+    const job = jobs.find((j) => j.id === jobId);
     const next = apps.map((a) =>
-      a.jobId === jobId ? { ...a, status: "applied" as const } : a
+      a.jobId === jobId
+        ? {
+            ...a,
+            status: "applied" as const,
+            outcome: "applied" as const,
+            outcomeAt: Date.now(),
+            source: job?.source,
+          }
+        : a
+    );
+    store.setApps(next);
+    setApps(next);
+  }
+
+  /** What happened after applying — this is what makes the funnel meaningful. */
+  function setOutcome(jobId: string, outcome: OutcomeStage) {
+    const next = apps.map((a) =>
+      a.jobId === jobId ? { ...a, outcome, outcomeAt: Date.now() } : a
     );
     store.setApps(next);
     setApps(next);
@@ -234,6 +252,7 @@ export default function AutoApplyPage() {
                 portals={profile?.portals || []}
                 job={jobs.find((j) => j.id === app.jobId)}
                 onApplied={() => markApplied(app.jobId)}
+                onOutcome={(o) => setOutcome(app.jobId, o)}
                 onRemove={() => removeApp(app.jobId)}
               />
             ))}
@@ -248,12 +267,14 @@ function AppCard({
   portals,
   job,
   onApplied,
+  onOutcome,
   onRemove,
 }: {
   app: PreparedApplication;
   portals: string[];
   job?: Job;
   onApplied: () => void;
+  onOutcome: (o: OutcomeStage) => void;
   onRemove: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -308,6 +329,33 @@ function AppCard({
           Remove
         </button>
       </div>
+
+      {app.status === "applied" && (
+        <div className="mt-3 pt-3 border-t border-ink-800">
+          <p className="text-[11px] uppercase tracking-wider text-ink-400 font-semibold mb-2">
+            What happened?
+          </p>
+          <div className="flex gap-1.5 flex-wrap">
+            {OUTCOME_STAGES.map((o) => (
+              <button
+                key={o}
+                onClick={() => onOutcome(o)}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border capitalize transition ${
+                  app.outcome === o
+                    ? o === "offer"
+                      ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
+                      : o === "rejected" || o === "ghosted"
+                      ? "bg-coral-500/15 text-coral-400 border-coral-500/40"
+                      : "bg-sky2-500/15 text-sky2-400 border-sky2-500/40"
+                    : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                }`}
+              >
+                {o}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <button className="text-xs text-neon-400 mt-3 hover:underline" onClick={() => setOpen(!open)}>
         {open ? "Hide application kit ▲" : "Open application kit ▼"}

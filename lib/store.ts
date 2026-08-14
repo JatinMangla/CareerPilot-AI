@@ -8,6 +8,7 @@ import type {
   PreparedApplication,
   QueuedApplication,
   SentEmail,
+  ReferralRecord,
   InboxMessage,
   OutreachDraft,
   Strategy,
@@ -22,6 +23,7 @@ const KEYS = {
   apps: "cp_apps",
   queue: "cp_queue",
   emails: "cp_emails",
+  referrals: "cp_referrals",
   inbox: "cp_inbox",
   lastSync: "cp_last_sync",
   draft: "cp_outreach_draft",
@@ -356,6 +358,9 @@ export const store = {
 
   getEmails: () => read<SentEmail[]>(KEYS.emails, []),
   setEmails: (e: SentEmail[]) => write(KEYS.emails, e),
+
+  getReferrals: () => read<ReferralRecord[]>(KEYS.referrals, []),
+  setReferrals: (r: ReferralRecord[]) => write(KEYS.referrals, r),
 
   getInbox: () => read<InboxMessage[]>(KEYS.inbox, []),
   setInbox: (m: InboxMessage[]) => write(KEYS.inbox, m),

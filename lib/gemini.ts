@@ -87,6 +87,13 @@ function requestBody(
   });
 }
 
+/** Transient upstream conditions worth one more shot. */
+function isRetryable(status: number): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 function apiError(status: number, body: string): Error {
   if (status === 429) {
     return Object.assign(
@@ -112,17 +119,27 @@ async function generate(
 ): Promise<string> {
   const key = process.env.GEMINI_API_KEY!;
   const { model, thinking } = resolve(tier);
+  const payload = requestBody(system, user, maxTokens, thinking, schema);
 
-  const res = await fetch(`${BASE}/${model}:generateContent?key=${key}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: requestBody(system, user, maxTokens, thinking, schema),
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    console.error("[gemini] request failed", { model, status: res.status });
-    throw apiError(res.status, body);
+  // Gemini returns transient 503s under load; without a retry those surfaced to
+  // the user as a hard failure mid-task.
+  let res!: Response;
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    res = await fetch(`${BASE}/${model}:generateContent?key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    });
+    if (res.ok) break;
+    if (!isRetryable(res.status) || attempt === MAX_ATTEMPTS) {
+      const body = await res.text().catch(() => "");
+      console.error("[gemini] request failed", { model, status: res.status, attempt });
+      throw apiError(res.status, body);
+    }
+    const backoff = 700 * 2 ** (attempt - 1);
+    console.error("[gemini] retrying", { model, status: res.status, attempt, backoff });
+    await sleep(backoff);
   }
 
   const data = await res.json();

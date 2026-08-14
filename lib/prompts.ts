@@ -374,16 +374,34 @@ Give me a frank performance report:
     }),
   },
 
-  // ---------- Practice (LeetCode-style, frontend-focused) ----------
+  // ---------- Practice (mirrors real frontend interview rounds) ----------
   practice_question: {
     mode: "json",
-    tier: "fast",
-    maxTokens: 6000,
-    build: ({ topic, difficulty, seen }) => ({
-      system: SYSTEM_BASE,
-      user: `Generate one ${difficulty || "Medium"} coding question for a frontend developer interview. Topic preference: ${topic || "JavaScript / arrays / strings / React logic"}. Avoid these already-seen titles: ${seen || "(none)"}.
+    tier: "standard",
+    maxTokens: 8000,
+    build: ({ topic, difficulty, seen, format }) => ({
+      system: `${SYSTEM_BASE}
 
-It should be solvable in plain JavaScript/TypeScript in a textarea (no test runner). starterCode: a JS function skeleton with a clear signature and a comment describing input/output. examples: 2-3 "Input: ... → Output: ..." lines. hints: 2-3 progressive hints.`,
+Real frontend interviews are overwhelmingly practical: a 45-60 minute pair-programming round building something small but real — fetch an API and render a filterable, sortable list; handle loading and error states; a debounced search; an accessible modal; a paginated table. Interviewers watch component decomposition, state modelling, edge-case handling, and how the candidate handles ambiguity. Algorithm puzzles are a much smaller part of the loop for this role.`,
+      user: `Generate one ${difficulty || "Medium"} ${
+        format === "algorithm"
+          ? "algorithm-style question (a pure function, no UI)"
+          : "practical component-building question, the kind asked in a live frontend pair-programming round"
+      } for a frontend developer interview.
+
+Topic preference: ${topic || "React components, hooks, async data"}.
+Avoid these already-seen titles: ${seen || "(none)"}.
+
+It must be answerable in one code textarea with no test runner or preview, so ${
+        format === "algorithm"
+          ? "a pure function is right."
+          : "ask for a single React component (hooks allowed, no imports beyond React) and describe the required UI behaviour precisely enough that the code can be judged by reading it."
+      }
+
+- "description": the problem, naming the edge cases you expect handled (empty, loading, error, rapid input).
+- "starterCode": a skeleton with the exact signature/props and a comment stating required behaviour.
+- "examples": 2-3 lines of expected behaviour — for a component describe UI states, not input→output.
+- "hints": 2-3 progressive hints.`,
     }),
     schema: obj({
       title: str,
@@ -469,6 +487,111 @@ Return:
 - "note": one sentence to me on what angle you took and anything I should double-check before sending.`,
     }),
     schema: obj({ subject: str, body: str, note: str }),
+  },
+
+  // ---------- Referrals ----------
+  referral_plan: {
+    mode: "json",
+    tier: "deep",
+    maxTokens: 12000,
+    build: ({ job, resume, profile }) => ({
+      system: `${SYSTEM_BASE}
+
+You are helping with a referral request, which converts roughly 15× better than a cold application — referred candidates are ~30% likely to reach interview versus 1-2% for applying through a portal.
+
+Rules that make a referral ask actually work:
+- The person being asked is spending their own credibility. Make it easy and low-risk for them: short, specific, and obviously declinable.
+- Never open with "I hope you're doing well" or a paragraph about yourself. Lead with the concrete ask or the specific connection.
+- Reference something real and checkable — the exact role, the team, a shared technology, a project of theirs. No invented flattery.
+- A referral note must be forwardable: the person should be able to paste it to their recruiter unchanged.
+- LinkedIn connection notes are capped at 300 characters. Respect that hard.`,
+      user: `I want a referral into this job rather than applying cold.
+
+<job>
+${JSON.stringify(job, null, 2)}
+</job>
+
+<my_resume>
+${resume}
+</my_resume>
+
+<my_profile>
+${JSON.stringify(profile)}
+</my_profile>
+
+Give me:
+- "whoToAsk": 3-5 concrete descriptions of the kinds of people at this company most likely to refer for THIS role, most promising first. Be specific about how I'd search for them (e.g. "Frontend engineers on the payments team — search LinkedIn for 'React' + the company name, filter to 2nd-degree"). Do not invent named individuals.
+- "searchQueries": 3-4 literal search strings I can paste into LinkedIn or Google to find those people.
+- "connectionNote": a LinkedIn connection request, MAXIMUM 300 characters, that earns a reply.
+- "referralMessage": the follow-up message once they accept — under 150 words, forwardable to their recruiter as-is.
+- "coldEmail": a version to send by email if I find their address, with a subject line.
+- "whyMeBullets": 3 bullets they can paste into an internal referral form, each tied to a specific requirement of this role.
+- "risk": one honest sentence on how strong my case is for this specific role, including any gap that might make someone hesitate to refer me.`,
+    }),
+    schema: obj({
+      whoToAsk: strArr,
+      searchQueries: strArr,
+      connectionNote: str,
+      referralMessage: str,
+      coldEmail: obj({ subject: str, body: str }),
+      whyMeBullets: strArr,
+      risk: str,
+    }),
+  },
+
+  // ---------- GitHub / portfolio review ----------
+  github_review: {
+    mode: "json",
+    tier: "deep",
+    maxTokens: 12000,
+    build: ({ profileData, repos, resume, profile }) => ({
+      system: `${SYSTEM_BASE}
+
+You are auditing a frontend developer's public GitHub the way a recruiter or hiring manager actually does: they open it BEFORE reading the resume, spend well under a minute, and decide whether this person ships real work. An optimised profile is worth roughly a 40% lift in callbacks.
+
+What matters, in order: pinned repos that are obviously relevant and obviously working; READMEs with a live demo link and a screenshot; recent, honest commit activity; clean project naming. What doesn't: tutorial clones with no README, "my-first-app" naming, hundreds of stale forks, contribution-graph theatre.
+
+Be specific and blunt. "Improve your README" is useless; "your top repo has no README, so a recruiter cannot tell in 15 seconds what it does — add a one-line description, a live URL, and a screenshot" is useful.`,
+      user: `Audit my public GitHub for frontend/React roles.
+
+<github_profile>
+${JSON.stringify(profileData, null, 2)}
+</github_profile>
+
+<repositories>
+${JSON.stringify(repos, null, 2)}
+</repositories>
+
+<my_resume>
+${resume}
+</my_resume>
+
+<my_profile>
+${JSON.stringify(profile)}
+</my_profile>
+
+Return:
+- "verdict": one honest sentence on the impression this profile gives a recruiter in under a minute.
+- "score": 0-100. Be strict — a profile with no pinned repos, no READMEs and no live demos should score under 40.
+- "quickWins": 3-5 changes I could make TODAY, each with the specific repo name and the exact thing to do.
+- "repoAdvice": for my most relevant repos, what to fix. Each: repo (exact name), issue, fix.
+- "profileReadme": a complete GitHub profile README (markdown) I can paste into a repo named after my username — real content from my actual experience, no placeholders.
+- "projectIdeas": 2-3 projects that would genuinely strengthen my case for the roles I'm targeting, each with why it lands and roughly how long it takes.`,
+    }),
+    schema: obj({
+      verdict: str,
+      score: int,
+      quickWins: strArr,
+      repoAdvice: {
+        type: "array",
+        items: obj({ repo: str, issue: str, fix: str }),
+      },
+      profileReadme: str,
+      projectIdeas: {
+        type: "array",
+        items: obj({ title: str, why: str, effort: str }),
+      },
+    }),
   },
 
   // ---------- Inbox triage ----------

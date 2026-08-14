@@ -18,6 +18,7 @@ const TOPICS = [
 export default function PracticePage() {
   const [topic, setTopic] = useState(TOPICS[0]);
   const [difficulty, setDifficulty] = useState<"Easy" | "Medium" | "Hard">("Medium");
+  const [format, setFormat] = useState<"component" | "algorithm">("component");
   const [q, setQ] = useState<PracticeQuestion | null>(null);
   const [code, setCode] = useState("");
   const [review, setReview] = useState<SolutionReview | null>(null);
@@ -37,6 +38,7 @@ export default function PracticePage() {
       const question = await jsonTask<PracticeQuestion>("practice_question", {
         topic,
         difficulty,
+        format,
         seen: seen.join(", "),
       });
       setQ(question);
@@ -99,6 +101,32 @@ export default function PracticePage() {
         <button className="btn-primary" onClick={newQuestion} disabled={busy === "question"}>
           {busy === "question" ? "Generating…" : q ? "Next question" : "{} Get a question"}
         </button>
+        <div className="w-full flex items-center gap-2 pt-1">
+          <span className="text-xs text-ink-400">Format:</span>
+          {([
+            { k: "component", label: "🧩 Build a component" },
+            { k: "algorithm", label: "🔢 Algorithm" },
+          ] as const).map((o) => (
+            <button
+              key={o.k}
+              onClick={() => setFormat(o.k)}
+              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold border transition ${
+                format === o.k
+                  ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
+                  : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="text-xs text-ink-300 bg-sky2-500/10 border border-sky2-500/25 rounded-xl px-4 py-3 leading-relaxed">
+        <b className="text-sky2-400">Practise what they actually ask.</b> Frontend loops are
+        mostly a 45–60 minute pair-programming round — fetch an API and render a filterable
+        list, handle loading and error states, debounce a search. Algorithm puzzles are a
+        smaller part of the loop for this role, so component format is the default.
       </div>
 
       {error && (

@@ -76,6 +76,53 @@ export interface Job {
   description?: string;
 }
 
+/* ---------- Referrals (the highest-converting channel) ---------- */
+
+export interface ReferralPlan {
+  whoToAsk: string[];
+  searchQueries: string[];
+  connectionNote: string;
+  referralMessage: string;
+  coldEmail: { subject: string; body: string };
+  whyMeBullets: string[];
+  risk: string;
+}
+
+export type ReferralStage = "planned" | "asked" | "accepted" | "referred" | "declined";
+
+export interface ReferralRecord {
+  id: string;
+  jobId: string;
+  jobTitle: string;
+  company: string;
+  contact?: string;
+  stage: ReferralStage;
+  plan: ReferralPlan;
+  at: number;
+  updatedAt: number;
+}
+
+/* ---------- Application outcomes (so there's a learning loop) ---------- */
+
+export type OutcomeStage =
+  | "applied"
+  | "replied"
+  | "screen"
+  | "interview"
+  | "offer"
+  | "rejected"
+  | "ghosted";
+
+export const OUTCOME_STAGES: OutcomeStage[] = [
+  "applied",
+  "replied",
+  "screen",
+  "interview",
+  "offer",
+  "rejected",
+  "ghosted",
+];
+
 export interface PreparedApplication {
   jobId: string;
   jobTitle: string;
@@ -87,6 +134,11 @@ export interface PreparedApplication {
   tailoredHighlights: string[];
   screeningAnswers: { question: string; answer: string }[];
   at: number;
+  /** Where it got to — the basis for the funnel on the dashboard. */
+  outcome?: OutcomeStage;
+  outcomeAt?: number;
+  /** Which channel produced it, so conversion can be compared per source. */
+  source?: string;
 }
 
 /* ---------- Auto-Pilot (direct apply on company career sites) ---------- */

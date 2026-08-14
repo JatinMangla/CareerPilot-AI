@@ -14,6 +14,17 @@ export default function Dashboard() {
   const [appsCount, setAppsCount] = useState(0);
   const [jobsCount, setJobsCount] = useState(0);
   const [quotas, setQuotas] = useState<QuotaInfo[]>([]);
+  const [referralCount, setReferralCount] = useState(0);
+  const [funnel, setFunnel] = useState({
+    applied: 0,
+    replied: 0,
+    screen: 0,
+    interview: 0,
+    offer: 0,
+    rejected: 0,
+    replyRate: 0,
+    interviewRate: 0,
+  });
 
   useEffect(() => {
     setResume(store.getResume());
@@ -23,6 +34,27 @@ export default function Dashboard() {
     setAppsCount(store.getApps().length);
     setJobsCount(store.getJobs().length);
     setQuotas(quota.all());
+
+    // Anything past "applied" counts toward the stages before it, so the funnel
+    // reads as a funnel rather than as disconnected buckets.
+    const apps = store.getApps().filter((a) => a.outcome);
+    const has = (...s: string[]) => apps.filter((a) => s.includes(a.outcome!)).length;
+    const applied = apps.length;
+    const replied = has("replied", "screen", "interview", "offer");
+    const screen = has("screen", "interview", "offer");
+    const interview = has("interview", "offer");
+    const offer = has("offer");
+    setFunnel({
+      applied,
+      replied,
+      screen,
+      interview,
+      offer,
+      rejected: has("rejected", "ghosted"),
+      replyRate: applied ? (replied / applied) * 100 : 0,
+      interviewRate: applied ? (interview / applied) * 100 : 0,
+    });
+    setReferralCount(store.getReferrals().filter((r) => r.stage !== "planned").length);
   }, []);
 
   const steps = [
@@ -113,6 +145,63 @@ export default function Dashboard() {
             <li>Practice questions solved: <b className="text-ink-100">{stats.practiceSolved}</b></li>
           </ul>
         </div>
+        <div className="card-pad md:col-span-2">
+          <h2 className="h2 mb-1">Your funnel</h2>
+          <p className="text-xs text-ink-400 mb-4">
+            Benchmark: cold applications convert at 1–2%, referrals at ~30%. If the middle
+            of this funnel is empty, applying more won&apos;t fix it — asking for referrals
+            will.
+          </p>
+          {funnel.applied === 0 ? (
+            <p className="text-sm text-ink-400">
+              Nothing tracked yet. Mark applications as applied on the{" "}
+              <Link href="/auto-apply" className="text-neon-400 underline">
+                Apply Kits
+              </Link>{" "}
+              page, then record what happened.
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
+                {[
+                  { k: "applied", label: "Applied", tone: "text-ink-100" },
+                  { k: "replied", label: "Replied", tone: "text-sky2-400" },
+                  { k: "screen", label: "Screen", tone: "text-sky2-400" },
+                  { k: "interview", label: "Interview", tone: "text-amberx-400" },
+                  { k: "offer", label: "Offer", tone: "text-neon-400" },
+                  { k: "rejected", label: "Closed", tone: "text-coral-400" },
+                ].map((s) => (
+                  <div key={s.k}>
+                    <div className={`font-display text-2xl font-bold ${s.tone}`}>
+                      {(funnel as any)[s.k]}
+                    </div>
+                    <div className="text-[11px] uppercase tracking-wider text-ink-400 mt-0.5">
+                      {s.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-ink-300 mt-4">
+                Reply rate:{" "}
+                <b className={funnel.replyRate >= 10 ? "text-neon-400" : "text-amberx-400"}>
+                  {funnel.replyRate.toFixed(0)}%
+                </b>{" "}
+                · Interview rate:{" "}
+                <b className={funnel.interviewRate >= 5 ? "text-neon-400" : "text-amberx-400"}>
+                  {funnel.interviewRate.toFixed(0)}%
+                </b>
+                {referralCount > 0 && (
+                  <>
+                    {" "}
+                    · <b className="text-neon-400">{referralCount}</b> referral ask
+                    {referralCount === 1 ? "" : "s"} in flight
+                  </>
+                )}
+              </p>
+            </>
+          )}
+        </div>
+
         <div className="card-pad">
           <h2 className="h2 mb-3">Free-tier usage</h2>
           <div className="space-y-4">
