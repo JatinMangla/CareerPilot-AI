@@ -66,8 +66,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     <SyncProvider>
     <div className="min-h-screen md:flex">
       {/* Sidebar (desktop) */}
-      <aside className="hidden md:flex md:flex-col w-64 shrink-0 border-r border-ink-800 bg-ink-900/60 backdrop-blur-sm p-4 sticky top-0 h-screen">
-        <Link href="/" className="flex items-center gap-2.5 px-2 py-3 mb-4">
+      <aside className="hidden md:flex md:flex-col w-64 shrink-0 border-r border-ink-800 bg-ink-900/60 backdrop-blur-sm sticky top-0 h-screen">
+        {/* Logo and footer stay put; only the links scroll. */}
+        <Link href="/" className="flex items-center gap-2.5 px-6 py-4 shrink-0">
           <span className="grid place-items-center w-9 h-9 rounded-xl bg-neon-500 text-ink-950 font-display font-bold text-lg shadow-glow">
             C
           </span>
@@ -75,8 +76,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             CareerPilot <span className="text-neon-400">AI</span>
           </span>
         </Link>
-        {nav}
-        <div className="mt-auto pt-4 border-t border-ink-800 space-y-1">
+
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-thin px-4 pb-2">{nav}</div>
+
+        <div className="shrink-0 px-4 pt-3 pb-4 border-t border-ink-800 space-y-1 bg-ink-900/60">
           <SyncBadge />
           <button onClick={logout} className="btn-secondary w-full text-xs">
             Sign out
@@ -97,11 +100,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </button>
       </div>
       {open && (
-        <div className="md:hidden fixed inset-x-0 top-[53px] z-40 bg-ink-900/95 backdrop-blur border-b border-ink-800 p-4">
-          {nav}
-          <button onClick={logout} className="btn-secondary w-full text-xs mt-3">
-            Sign out
-          </button>
+        <div className="md:hidden fixed inset-x-0 top-[53px] bottom-0 z-40 flex flex-col bg-ink-900/95 backdrop-blur border-b border-ink-800">
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-4">{nav}</div>
+          <div className="shrink-0 p-4 pt-3 border-t border-ink-800">
+            <button onClick={logout} className="btn-secondary w-full text-xs">
+              Sign out
+            </button>
+          </div>
         </div>
       )}
 
