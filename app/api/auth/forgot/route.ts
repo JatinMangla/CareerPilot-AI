@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
-import { createOtpToken, OTP_COOKIE } from "@/lib/auth";
+import { createOtpToken, generateOtpCode, OTP_COOKIE } from "@/lib/auth";
+import { rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,21 @@ export async function POST() {
     );
   }
 
-  // simple cooldown so the endpoint can't be spammed
+  // Server-side, so it can't be skipped by omitting a cookie. This endpoint is
+  // unauthenticated — without a real limit it can drain the email quota and
+  // mailbomb the owner.
+  const limited = await rateLimit("otp-send", 5, 60 * 15);
+  if (!limited.allowed) {
+    return Response.json(
+      {
+        error:
+          "Too many login codes requested. Check your inbox (and spam), then try again in a few minutes.",
+      },
+      { status: 429, headers: { "Retry-After": String(limited.retryAfterSec) } }
+    );
+  }
+
+  // Short client-side cooldown purely for UX (stops double-clicks).
   if (cookies().get("cp_otp_cooldown")) {
     return Response.json(
       { error: "A code was just sent — check your inbox (and spam). You can request another in a minute." },
@@ -26,7 +41,7 @@ export async function POST() {
     );
   }
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const code = generateOtpCode();
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",

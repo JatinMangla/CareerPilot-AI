@@ -126,6 +126,15 @@ export async function expire(key: string, seconds: number): Promise<void> {
   await command(["EXPIRE", key, seconds]);
 }
 
+/** Increments a counter and ensures it expires, returning the new value. */
+export async function incrWithExpiry(key: string, ttlSec: number): Promise<number> {
+  const [count] = await pipeline([
+    ["INCR", key],
+    ["EXPIRE", key, ttlSec],
+  ]);
+  return Number(typeof count === "object" ? count?.result : count) || 0;
+}
+
 export async function clearAll(): Promise<void> {
   await command(["DEL", HASH]);
 }

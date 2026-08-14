@@ -90,9 +90,24 @@ function read<T>(key: string, fallback: T): T {
   }
 }
 
+/** localStorage is capped (~5MB on iOS). Never let a full quota throw into React. */
+function safeSet(key: string, raw: string): boolean {
+  try {
+    window.localStorage.setItem(key, raw);
+    return true;
+  } catch (err) {
+    console.error(`[store] could not save "${key}" — storage full?`, err);
+    setSyncState(
+      "error",
+      "This device's storage is full. Older Job Inbox mail is the usual cause — sync still works on your other devices."
+    );
+    return false;
+  }
+}
+
 function write<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
+  if (!safeSet(key, JSON.stringify(value))) return;
   if (DEVICE_ONLY.has(key)) return;
   stamp(key);
   dirty.add(key);
@@ -134,24 +149,28 @@ function flushBeacon(): void {
   const data = pendingPayload();
   if (!data) return;
   const body = JSON.stringify({ data });
+
+  // NOTE: we deliberately do NOT clear `dirty` here.
+  //
+  // sendBeacon returning true only means the browser queued the request — it
+  // says nothing about the server accepting it, and a keepalive fetch can still
+  // fail. Clearing on a queued-but-unconfirmed send meant a 502 (or Redis being
+  // down) silently discarded the pending changes: the data survived only in
+  // localStorage, no longer marked as needing an upload. Leaving the keys dirty
+  // costs one redundant re-send next time and cannot lose anything. The server
+  // merge is timestamp-based, so re-sending is harmless.
   try {
     const blob = new Blob([body], { type: "application/json" });
-    if (navigator.sendBeacon?.("/api/state", blob)) {
-      dirty.clear();
-      return;
-    }
+    if (navigator.sendBeacon?.("/api/state", blob)) return;
   } catch {
     /* fall through to keepalive fetch */
   }
-  // keepalive lets the request outlive the page in browsers without sendBeacon
   fetch("/api/state", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
     keepalive: true,
-  })
-    .then(() => dirty.clear())
-    .catch(() => {});
+  }).catch(() => {});
 }
 
 /** Send locally-changed keys to the server. */
@@ -210,9 +229,12 @@ async function pull(): Promise<boolean> {
       if (DEVICE_ONLY.has(key)) continue;
       const localAt = meta[key] ?? -1;
       if ((entry?.at ?? 0) > localAt) {
-        window.localStorage.setItem(key, JSON.stringify(entry.value));
-        stamp(key, entry.at);
-        changed = true;
+        // Keep going if one key fails — a partially-applied merge that aborts
+        // mid-loop leaves later keys stale with no indication why.
+        if (safeSet(key, JSON.stringify(entry.value))) {
+          stamp(key, entry.at);
+          changed = true;
+        }
       }
     }
 
