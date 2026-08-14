@@ -206,15 +206,30 @@ async function fillForm(page, app, profile, resumePath, report) {
 
     /* ---- resume / file uploads ---- */
     if (f.type === "file") {
-      const isResume = /resume|cv|attach/i.test(`${f.label} ${f.name}`) || !/cover/i.test(f.label);
+      const haystack = `${f.label} ${f.name}`;
+      // Positive match only. The old rule was "anything not labelled cover", so
+      // a "Portfolio (PDF)" or "Transcript" input received the resume — and if
+      // it appeared first, the real resume field was left empty while the run
+      // still counted an upload and passed the submit gate.
+      const isResume = /\b(resume|cv|curriculum\s*vitae)\b/i.test(haystack);
+      const isCover = /\bcover\s*letter\b/i.test(haystack);
+
       if (isResume && resumePath) {
         try {
           await loc.setInputFiles(resumePath, { timeout: 15000 });
           report.filled.push({ field: f.label || "resume", value: "<resume PDF>" });
           log(c.green(`   ✓ uploaded resume → "${f.label || f.name}"`));
-        } catch (e) {
-          report.skipped.push({ field: f.label || "resume", why: "upload failed" });
+        } catch {
+          report.needsYou.push({ field: f.label || "resume", why: "resume upload failed" });
+          log(c.amber(`   ⚠ resume upload failed → "${f.label || f.name}"`));
         }
+      } else if (!isCover) {
+        // Some other attachment we can't identify — never guess with a file.
+        report.needsYou.push({
+          field: f.label || f.name || "file upload",
+          why: "unrecognised file field",
+        });
+        log(c.amber(`   ⚠ unknown file field, left empty: "${(f.label || f.name).slice(0, 60)}"`));
       }
       continue;
     }
@@ -225,7 +240,12 @@ async function fillForm(page, app, profile, resumePath, report) {
     if (f.type === "radio" || f.type === "checkbox") {
       if (SKIP_INTENTS.has(intent)) continue; // voluntary demographic questions
       const prepared = matchPreparedAnswer(f.label || f.name, app.screeningAnswers);
-      if (!prepared) continue;
+      if (!prepared) {
+        if (f.required) {
+          report.needsYou.push({ field: f.label || f.name, why: "unanswered choice" });
+        }
+        continue;
+      }
       const wantsYes = /^\s*(yes|true|i am|authorized|indian citizen)/i.test(prepared.answer);
       const optionText = (f.optionLabel || "").toLowerCase();
       const isYesOption = /\byes\b/.test(optionText);
@@ -270,10 +290,16 @@ async function fillForm(page, app, profile, resumePath, report) {
     /* ---- text inputs & textareas ---- */
     const decided = valueFor(intent, f.label || f.name, app, profile);
     if (!decided || !decided.value) {
-      if (f.required) {
-        report.needsYou.push({ field: f.label || f.name, why: "required, no confident answer" });
-        log(c.amber(`   ⚠ needs you: "${(f.label || f.name).slice(0, 70)}"`));
-      }
+      // Flag ANY field we couldn't answer, not just ones carrying the `required`
+      // attribute. Greenhouse/Lever/Ashby usually mark required fields with a
+      // visual asterisk and validate in JavaScript, so keying off `required`
+      // meant unanswered mandatory questions never reached needsYou — and the
+      // submit gate happily fired on name + email + resume alone.
+      report.needsYou.push({
+        field: f.label || f.name || `field #${f.idx}`,
+        why: f.required ? "required, no confident answer" : "unrecognised field",
+      });
+      log(c.amber(`   ⚠ needs you: "${(f.label || f.name || "").slice(0, 70)}"`));
       continue;
     }
     if (decided.confidence !== "high") {

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask, streamTask } from "@/lib/aiClient";
-import { detectAts } from "@/lib/ats";
+import { detectAts, isVerifiedSource } from "@/lib/ats";
 import type { AutoTailorPlan, Job, QueuedApplication } from "@/lib/types";
 
 export default function AutoPilotPage() {
@@ -34,6 +34,19 @@ export default function AutoPilotPage() {
       (j) => selected[j.id] && !queue.some((q) => q.jobId === j.id)
     );
     if (!picked.length) return setError("Select at least one job that isn't queued yet.");
+
+    // AI-researched leads are plausible-looking guesses — the company, the role
+    // and the URL may not exist. They're fine to read; they must not be queued
+    // for automated submission.
+    const unverified = picked.filter((j) => !isVerifiedSource(j.source));
+    if (unverified.length) {
+      return setError(
+        `${unverified.length} of these are AI-researched leads, not verified listings ` +
+          `(${unverified.slice(0, 3).map((j) => j.company).join(", ")}${unverified.length > 3 ? "…" : ""}). ` +
+          `Their URLs may not exist, so Auto-Pilot won't submit to them. ` +
+          `Use the "Company boards" or "Y Combinator" source on the Job Matches page for auto-applyable roles.`
+      );
+    }
 
     // Each job is one deep-tier AI call. Cap the run so a stray click can't
     // burn the day's free quota in one go.
@@ -308,14 +321,20 @@ export default function AutoPilotPage() {
                 <span className="text-sm text-ink-100">{job.title}</span>
                 <span className="text-xs text-ink-400">@ {job.company}</span>
                 <span className="ml-auto flex items-center gap-2">
-                  <span
-                    className={
-                      ats.autoSubmit ? "badge-green" : ats.autoFill ? "badge-amber" : "badge-red"
-                    }
-                    title={ats.note}
-                  >
-                    {ats.autoSubmit ? "🤖 auto-submit" : ats.autoFill ? "✋ auto-fill" : "manual"}
-                  </span>
+                  {!isVerifiedSource(job.source) ? (
+                    <span className="badge-red" title="AI-researched lead — URL may not exist, so it can't be auto-submitted">
+                      ⚠ unverified
+                    </span>
+                  ) : (
+                    <span
+                      className={
+                        ats.autoSubmit ? "badge-green" : ats.autoFill ? "badge-amber" : "badge-red"
+                      }
+                      title={ats.note}
+                    >
+                      {ats.autoSubmit ? "🤖 auto-submit" : ats.autoFill ? "✋ auto-fill" : "manual"}
+                    </span>
+                  )}
                   <span className="badge-blue">{job.matchScore}%</span>
                 </span>
               </label>

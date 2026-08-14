@@ -49,6 +49,25 @@ const PORTALS = [
   "hirist.",
 ];
 
+/**
+ * Sources whose listings came from a real job board or API.
+ *
+ * `find_jobs` asks the model to invent "currently-plausible" openings, including
+ * their URLs — which is fine as a research lead, but those URLs must never reach
+ * the submit agent. A fabricated greenhouse.io link looks auto-submittable to
+ * detectAts and would have an application sent to it.
+ */
+const VERIFIED_SOURCES = new Set([
+  "company-boards",
+  "yc-boards",
+  "jsearch",
+  "adzuna",
+]);
+
+export function isVerifiedSource(source: string | undefined): boolean {
+  return !!source && VERIFIED_SOURCES.has(source);
+}
+
 export function detectAts(rawUrl: string): AtsInfo {
   const url = (rawUrl || "").toLowerCase();
 

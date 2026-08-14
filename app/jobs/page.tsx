@@ -5,6 +5,7 @@ import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { quota } from "@/lib/quota";
+import { isVerifiedSource } from "@/lib/ats";
 import type { Job } from "@/lib/types";
 
 export default function JobsPage() {
@@ -41,7 +42,8 @@ export default function JobsPage() {
 
       let result: { jobs: Job[] };
       if (live.available && live.listings?.length) {
-        quota.bump("jobsApi");
+        // Company boards are free public JSON — only metered aggregators count.
+        if (live.source === "jsearch" || live.source === "adzuna") quota.bump("jobsApi");
         setStatus(
           `Analyzing ${live.listings.length} live listings (${live.source}) against your resume…`
         );
@@ -165,15 +167,40 @@ export default function JobsPage() {
 
       {jobs.length > 0 && (
         <>
-          {jobs[0]?.source === "ai-researched" ? (
-            <div className="text-xs text-amberx-400 bg-amberx-500/10 border border-amberx-500/25 rounded-xl px-4 py-3">
-              These are AI-researched leads — verify each on the portal before applying.
-            </div>
-          ) : (
-            <div className="text-xs text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3">
-              ✓ Live listings from {jobs[0]?.source === "jsearch" ? "Google for Jobs (LinkedIn/Indeed/Glassdoor)" : "Adzuna"}, analyzed by AI against your resume.
-            </div>
-          )}
+          {(() => {
+            // Describe what's actually in the list, not just jobs[0] — a mixed
+            // list used to be labelled by whatever happened to be first.
+            const LABELS: Record<string, string> = {
+              "company-boards": "company career boards (Greenhouse/Lever/Ashby)",
+              "yc-boards": "Y Combinator company boards",
+              jsearch: "Google for Jobs (LinkedIn/Indeed/Glassdoor)",
+              adzuna: "Adzuna",
+              "ai-researched": "AI research",
+            };
+            const sources = Array.from(new Set(jobs.map((j) => j.source).filter(Boolean)));
+            const unverifiedCount = jobs.filter((j) => !isVerifiedSource(j.source)).length;
+            const names = sources.map((s) => LABELS[s] || s).join(" + ");
+
+            if (unverifiedCount === jobs.length) {
+              return (
+                <div className="text-xs text-amberx-400 bg-amberx-500/10 border border-amberx-500/25 rounded-xl px-4 py-3 leading-relaxed">
+                  ⚠ These are <b>AI-researched leads</b>, not verified listings — the company
+                  may be real but the role and link may not be. Verify each one before
+                  applying; Auto-Pilot won&apos;t submit to them.
+                </div>
+              );
+            }
+            return (
+              <div className="text-xs text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3 leading-relaxed">
+                ✓ {jobs.length - unverifiedCount} live listing
+                {jobs.length - unverifiedCount === 1 ? "" : "s"} from {names}, scored by AI
+                against your resume.
+                {unverifiedCount > 0 && (
+                  <> {unverifiedCount} AI-researched lead(s) are mixed in and marked separately.</>
+                )}
+              </div>
+            );
+          })()}
           <div className="grid gap-4">
             {jobs
               .slice()
