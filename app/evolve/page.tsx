@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { store, defaultStats } from "@/lib/store";
+import { store, defaultStats, defaultStrategy } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { buildClaudeStrategyPrompt } from "@/lib/claudePrompt";
 import type { Strategy, Profile, UsageStats } from "@/lib/types";
@@ -32,7 +32,15 @@ export default function EvolvePage() {
     try {
       const result = await jsonTask<{ systemAddendum: string; notes: string[] }>(
         "meta_optimize",
-        { stats, strategy, userFeedback: feedback }
+        {
+          stats,
+          strategy,
+          userFeedback: feedback,
+          // Real results, so the revision is grounded in what's actually
+          // happening rather than in generic best practice.
+          funnel: buildFunnelSnapshot(),
+          github: buildGithubSnapshot(),
+        }
       );
       const next: Strategy = {
         version: (strategy?.version ?? 1) + 1,
@@ -55,6 +63,42 @@ export default function EvolvePage() {
     if (profile) store.setProfile(profile);
   }
 
+  /** Applications and what came of them, for grounding strategy revisions. */
+  function buildFunnelSnapshot() {
+    const apps = store.getApps();
+    const tracked = apps.filter((a) => a.outcome);
+    const count = (...s: string[]) => tracked.filter((a) => s.includes(a.outcome!)).length;
+    const referrals = store.getReferrals();
+    return {
+      applicationsPrepared: apps.length,
+      applied: tracked.length,
+      replied: count("replied", "screen", "interview", "offer"),
+      interviews: count("interview", "offer"),
+      offers: count("offer"),
+      rejectedOrGhosted: count("rejected", "ghosted"),
+      referralAsksSent: referrals.filter((r) => r.stage !== "planned").length,
+      referralsSecured: referrals.filter((r) => r.stage === "referred").length,
+    };
+  }
+
+  /** Last GitHub audit, if one has been run. */
+  function buildGithubSnapshot() {
+    try {
+      const raw = window.localStorage.getItem("cp_github_review");
+      if (!raw) return null;
+      const { review, data } = JSON.parse(raw);
+      return {
+        score: review?.score,
+        verdict: review?.verdict,
+        publicRepos: data?.profile?.publicRepos,
+        reposWithDescription: data?.repos?.filter((r: any) => r.hasDescription).length,
+        reposWithLiveDemo: data?.repos?.filter((r: any) => r.hasHomepage).length,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   function generateClaudePrompt() {
     if (!profile || !strategy) return;
     setClaudePrompt(
@@ -65,9 +109,45 @@ export default function EvolvePage() {
         resume: store.getResume()?.text,
         validation: store.getValidation(),
         feedback,
+        funnel: buildFunnelSnapshot(),
+        github: buildGithubSnapshot(),
       })
     );
     setCopied(false);
+  }
+
+  /**
+   * Folds the current evidence-based baseline into whatever strategy the user
+   * already has, keeping the sharper directive wherever the two overlap. Their
+   * own tuned strategy is worth preserving — this adds what it predates.
+   */
+  async function applyBaseline() {
+    setError("");
+    setMerging(true);
+    try {
+      const result = await jsonTask<{ systemAddendum: string; notes: string[] }>(
+        "merge_strategies",
+        {
+          current: strategy?.systemAddendum || "",
+          claudeOutput: defaultStrategy.systemAddendum,
+          profile,
+          stats,
+        }
+      );
+      const next: Strategy = {
+        version: (strategy?.version ?? 1) + 1,
+        systemAddendum: result.systemAddendum,
+        notes: result.notes,
+        updatedAt: Date.now(),
+      };
+      store.setStrategy(next);
+      setStrategy(next);
+      setJustEvolved(true);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setMerging(false);
+    }
   }
 
   async function mergeBrains() {
@@ -130,9 +210,19 @@ export default function EvolvePage() {
               {strategy ? new Date(strategy.updatedAt).toLocaleString() : "never"}
             </div>
           </div>
-          <button className="btn-primary text-base px-6 py-3" onClick={evolve} disabled={busy}>
-            {busy ? "Evolving…" : "∞ Evolve now"}
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              className="btn-secondary"
+              onClick={applyBaseline}
+              disabled={busy || merging}
+              title="Fold the latest hiring research into your existing strategy, keeping what you already have"
+            >
+              {merging ? "Merging…" : "↻ Apply latest research"}
+            </button>
+            <button className="btn-primary text-base px-6 py-3" onClick={evolve} disabled={busy}>
+              {busy ? "Evolving…" : "∞ Evolve now"}
+            </button>
+          </div>
         </div>
 
         <div>

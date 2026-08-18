@@ -1,40 +1,72 @@
 /**
  * Google Gemini provider — the only AI provider in this app.
  *
- * Three things this module gets right that the first version didn't:
- *  1. Streaming actually streams (SSE), instead of blocking and dumping.
- *  2. JSON tasks enforce the schema via `responseSchema`, not by asking nicely
- *     in the prompt — so a malformed response can't reach a `.map()` in the UI.
- *  3. Thinking is bounded per tier, so reasoning can't eat the whole output
- *     budget and return an empty candidate.
+ * Reliability first. The free tier's newest models are heavily contended: at the
+ * time of writing gemini-3.7-flash answered 0 of 3 requests (503 "experiencing
+ * high demand", then 429), which took every "deep" task down with it. So each
+ * tier is a CHAIN of models: on an overload or quota error we walk to the next
+ * one instead of surfacing a failure. Quality steps down; the feature still works.
+ *
+ * Also fixed here, because the first version got them wrong:
+ *  - streaming genuinely streams (SSE) rather than blocking then dumping
+ *  - JSON tasks enforce `responseSchema` instead of asking nicely in the prompt
+ *  - thinking is bounded, so reasoning cannot consume the whole output budget
  */
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 export type Tier = "fast" | "standard" | "deep";
 
+interface ModelSpec {
+  id: string;
+  /** 2.5-era models reject `thinkingLevel` outright (400 INVALID_ARGUMENT). */
+  thinkingLevel: boolean;
+}
+
 /**
- * Free-tier models, verified against the live API. Pro models return 429 on the
- * free tier, so the Flash family is the whole menu.
+ * Ordered fallback chains, verified against the live free tier.
  *   fast     — classification, judging, short interview turns
  *   standard — most work
- *   deep     — text that goes in front of an employer
+ *   deep     — text that reaches an employer
  */
-const TIER_MODELS: Record<Tier, { model: string; thinking: "off" | "low" | "high" }> = {
-  fast: { model: "gemini-3.5-flash-lite", thinking: "off" },
-  standard: { model: "gemini-3.6-flash", thinking: "low" },
-  deep: { model: "gemini-3.7-flash", thinking: "high" },
+const CHAINS: Record<Tier, { thinking: "low" | "high"; models: ModelSpec[] }> = {
+  fast: {
+    thinking: "low",
+    models: [
+      { id: "gemini-3.5-flash-lite", thinkingLevel: true },
+      { id: "gemini-2.5-flash", thinkingLevel: false },
+    ],
+  },
+  standard: {
+    thinking: "low",
+    models: [
+      { id: "gemini-3.5-flash", thinkingLevel: true },
+      { id: "gemini-3.6-flash", thinkingLevel: true },
+      { id: "gemini-2.5-flash", thinkingLevel: false },
+    ],
+  },
+  deep: {
+    thinking: "high",
+    models: [
+      { id: "gemini-3.6-flash", thinkingLevel: true },
+      { id: "gemini-3.5-flash", thinkingLevel: true },
+      { id: "gemini-2.5-flash", thinkingLevel: false },
+    ],
+  },
 };
 
-function resolve(tier: Tier = "standard") {
+function chainFor(tier: Tier = "standard") {
+  const c = CHAINS[tier] ?? CHAINS.standard;
   const override = process.env.GEMINI_MODEL;
-  const t = TIER_MODELS[tier] ?? TIER_MODELS.standard;
-  return { model: override || t.model, thinking: t.thinking };
+  if (override) {
+    return { thinking: c.thinking, models: [{ id: override, thinkingLevel: true }] };
+  }
+  return c;
 }
 
 /**
  * Gemini's responseSchema is an OpenAPI subset — it rejects JSON Schema keywords
- * like `additionalProperties`. Strip what it doesn't accept.
+ * like `additionalProperties`. Strip what it will not accept.
  */
 function toGeminiSchema(schema: any): any {
   if (Array.isArray(schema)) return schema.map(toGeminiSchema);
@@ -55,40 +87,31 @@ function toGeminiSchema(schema: any): any {
   return out;
 }
 
-function generationConfig(
-  maxTokens: number,
-  thinking: "off" | "low" | "high",
-  schema?: Record<string, any>
-) {
-  const cfg: Record<string, any> = {
-    maxOutputTokens: maxTokens,
-    // Thinking tokens count against maxOutputTokens; unbounded reasoning is how
-    // the old build produced empty responses with finishReason MAX_TOKENS.
-    thinkingConfig: { thinkingLevel: thinking === "off" ? "low" : thinking },
-  };
-  if (schema) {
-    cfg.responseMimeType = "application/json";
-    cfg.responseSchema = toGeminiSchema(schema);
-  }
-  return cfg;
-}
-
 function requestBody(
+  spec: ModelSpec,
   system: string,
   user: string,
   maxTokens: number,
-  thinking: "off" | "low" | "high",
+  thinking: "low" | "high",
   schema?: Record<string, any>
 ) {
+  const generationConfig: Record<string, any> = { maxOutputTokens: maxTokens };
+  // Thinking tokens count against maxOutputTokens; leaving this unbounded is how
+  // the old build returned empty candidates with finishReason MAX_TOKENS.
+  if (spec.thinkingLevel) generationConfig.thinkingConfig = { thinkingLevel: thinking };
+  if (schema) {
+    generationConfig.responseMimeType = "application/json";
+    generationConfig.responseSchema = toGeminiSchema(schema);
+  }
   return JSON.stringify({
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: "user", parts: [{ text: user }] }],
-    generationConfig: generationConfig(maxTokens, thinking, schema),
+    generationConfig,
   });
 }
 
-/** Transient upstream conditions worth one more shot. */
-function isRetryable(status: number): boolean {
+/** Overload / quota conditions worth retrying or falling back from. */
+function isTransient(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
@@ -98,7 +121,7 @@ function apiError(status: number, body: string): Error {
   if (status === 429) {
     return Object.assign(
       new Error(
-        "Gemini free-tier limit reached — it resets daily. Wait a minute and retry, or try again tomorrow."
+        "Every available AI model is rate-limited right now. The free tier resets daily — try again in a few minutes."
       ),
       { status }
     );
@@ -109,7 +132,34 @@ function apiError(status: number, body: string): Error {
   return Object.assign(new Error(`Gemini error ${status}: ${body.slice(0, 300)}`), { status });
 }
 
-/** Non-streaming call, used for JSON tasks. */
+type CallResult =
+  | { ok: true; data: any }
+  | { ok: false; status: number; body: string };
+
+/** Calls one model, retrying transient failures before giving up on it. */
+async function callModel(
+  spec: ModelSpec,
+  payload: string,
+  key: string,
+  attempts = 2
+): Promise<CallResult> {
+  let last: CallResult = { ok: false, status: 0, body: "" };
+  for (let i = 1; i <= attempts; i++) {
+    const res = await fetch(`${BASE}/${spec.id}:generateContent?key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    });
+    if (res.ok) return { ok: true, data: await res.json() };
+
+    const body = await res.text().catch(() => "");
+    last = { ok: false, status: res.status, body };
+    if (!isTransient(res.status)) break; // a real error — don't spend the chain on it
+    if (i < attempts) await sleep(600 * i);
+  }
+  return last;
+}
+
 async function generate(
   system: string,
   user: string,
@@ -118,45 +168,41 @@ async function generate(
   schema?: Record<string, any>
 ): Promise<string> {
   const key = process.env.GEMINI_API_KEY!;
-  const { model, thinking } = resolve(tier);
-  const payload = requestBody(system, user, maxTokens, thinking, schema);
+  const { models, thinking } = chainFor(tier);
+  let lastStatus = 0;
+  let lastBody = "";
 
-  // Gemini returns transient 503s under load; without a retry those surfaced to
-  // the user as a hard failure mid-task.
-  let res!: Response;
-  const MAX_ATTEMPTS = 3;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    res = await fetch(`${BASE}/${model}:generateContent?key=${key}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-    });
-    if (res.ok) break;
-    if (!isRetryable(res.status) || attempt === MAX_ATTEMPTS) {
-      const body = await res.text().catch(() => "");
-      console.error("[gemini] request failed", { model, status: res.status, attempt });
-      throw apiError(res.status, body);
+  for (const spec of models) {
+    const payload = requestBody(spec, system, user, maxTokens, thinking, schema);
+    const result = await callModel(spec, payload, key);
+
+    if (!result.ok) {
+      lastStatus = result.status;
+      lastBody = result.body;
+      if (isTransient(result.status)) {
+        console.error("[gemini] model unavailable, falling back", {
+          model: spec.id,
+          status: result.status,
+        });
+        continue;
+      }
+      throw apiError(result.status, result.body);
     }
-    const backoff = 700 * 2 ** (attempt - 1);
-    console.error("[gemini] retrying", { model, status: res.status, attempt, backoff });
-    await sleep(backoff);
+
+    const cand = result.data?.candidates?.[0];
+    const text: string =
+      cand?.content?.parts?.map((p: any) => p.text || "").join("") || "";
+    if (text) return text;
+
+    // Empty candidate: usually the output budget was consumed by thinking, or a
+    // safety block. Both are worth one attempt on the next model down.
+    const reason = cand?.finishReason || result.data?.promptFeedback?.blockReason || "unknown";
+    console.error("[gemini] empty response, falling back", { model: spec.id, reason });
+    lastStatus = 502;
+    lastBody = `empty response (${reason})`;
   }
 
-  const data = await res.json();
-  const cand = data?.candidates?.[0];
-  const text: string =
-    cand?.content?.parts?.map((p: any) => p.text || "").join("") || "";
-
-  if (!text) {
-    const reason = cand?.finishReason || data?.promptFeedback?.blockReason || "unknown";
-    console.error("[gemini] empty response", { model, reason });
-    throw new Error(
-      reason === "MAX_TOKENS"
-        ? "Gemini ran out of output budget before answering. Try a shorter input."
-        : `Gemini returned no text (${reason}).`
-    );
-  }
-  return text;
+  throw apiError(lastStatus || 502, lastBody || "no model returned a response");
 }
 
 export async function geminiText(
@@ -168,7 +214,7 @@ export async function geminiText(
   return generate(system, user, maxTokens, tier);
 }
 
-/** Schema-enforced JSON. Throws if the model still returns something unparseable. */
+/** Schema-enforced JSON. Throws only once every model in the chain has failed. */
 export async function geminiJson(
   system: string,
   user: string,
@@ -191,8 +237,8 @@ export async function geminiJson(
 }
 
 /**
- * Real token-by-token streaming over SSE.
- * Returns a ReadableStream of plain text for the browser to append as it lands.
+ * Token-by-token streaming over SSE, with the same model fallback: if the first
+ * model is overloaded we switch before anything has been emitted.
  */
 export function geminiStream(
   system: string,
@@ -201,71 +247,86 @@ export function geminiStream(
   tier: Tier = "standard"
 ): ReadableStream<Uint8Array> {
   const key = process.env.GEMINI_API_KEY!;
-  const { model, thinking } = resolve(tier);
+  const { models, thinking } = chainFor(tier);
   const encoder = new TextEncoder();
 
   return new ReadableStream({
     async start(controller) {
-      try {
-        const res = await fetch(
-          `${BASE}/${model}:streamGenerateContent?alt=sse&key=${key}`,
-          {
+      let emitted = false;
+      let lastStatus = 0;
+
+      for (const spec of models) {
+        if (emitted) break;
+        try {
+          const res = await fetch(`${BASE}/${spec.id}:streamGenerateContent?alt=sse&key=${key}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: requestBody(system, user, maxTokens, thinking),
+            body: requestBody(spec, system, user, maxTokens, thinking),
+          });
+
+          if (!res.ok || !res.body) {
+            lastStatus = res.status;
+            if (isTransient(res.status)) {
+              console.error("[gemini] stream model unavailable, falling back", {
+                model: spec.id,
+                status: res.status,
+              });
+              continue;
+            }
+            throw apiError(res.status, await res.text().catch(() => ""));
           }
-        );
 
-        if (!res.ok || !res.body) {
-          const body = await res.text().catch(() => "");
-          throw apiError(res.status, body);
-        }
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let emitted = false;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
 
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
+            const frames = buffer.split(/\r?\n\r?\n/);
+            buffer = frames.pop() ?? "";
 
-          // SSE frames are separated by a blank line.
-          const frames = buffer.split(/\r?\n\r?\n/);
-          buffer = frames.pop() ?? "";
-
-          for (const frame of frames) {
-            const line = frame
-              .split(/\r?\n/)
-              .find((l) => l.startsWith("data:"));
-            if (!line) continue;
-            const payload = line.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
-            try {
-              const json = JSON.parse(payload);
-              const chunk =
-                json?.candidates?.[0]?.content?.parts
-                  ?.map((p: any) => p.text || "")
-                  .join("") || "";
-              if (chunk) {
-                emitted = true;
-                controller.enqueue(encoder.encode(chunk));
+            for (const frame of frames) {
+              const line = frame.split(/\r?\n/).find((l) => l.startsWith("data:"));
+              if (!line) continue;
+              const payload = line.slice(5).trim();
+              if (!payload || payload === "[DONE]") continue;
+              try {
+                const json = JSON.parse(payload);
+                const chunk =
+                  json?.candidates?.[0]?.content?.parts
+                    ?.map((p: any) => p.text || "")
+                    .join("") || "";
+                if (chunk) {
+                  emitted = true;
+                  controller.enqueue(encoder.encode(chunk));
+                }
+              } catch {
+                /* partial frame — the next read completes it */
               }
-            } catch {
-              /* partial frame — the next read completes it */
             }
           }
+          if (emitted) break;
+        } catch (err: any) {
+          console.error("[gemini] stream failed", { model: spec.id, err: err?.message });
+          if (!emitted) {
+            controller.enqueue(encoder.encode(`\n\n[AI error: ${err?.message || "unknown"}]`));
+            controller.close();
+            return;
+          }
         }
+      }
 
-        if (!emitted) {
-          controller.enqueue(
-            encoder.encode("[The AI returned nothing. Try again, or shorten your input.]")
-          );
-        }
-      } catch (err: any) {
-        console.error("[gemini] stream failed", { err: err?.message });
-        controller.enqueue(encoder.encode(`\n\n[AI error: ${err?.message || "unknown"}]`));
+      if (!emitted) {
+        controller.enqueue(
+          encoder.encode(
+            lastStatus === 429
+              ? "[Every AI model is rate-limited right now — the free tier resets daily. Try again shortly.]"
+              : "[Every AI model is busy right now. Please try again in a moment.]"
+          )
+        );
       }
       controller.close();
     },

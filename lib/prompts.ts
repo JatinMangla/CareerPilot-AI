@@ -543,7 +543,9 @@ Give me:
   github_review: {
     mode: "json",
     tier: "deep",
-    maxTokens: 12000,
+    // Generous: this returns a full profile README plus per-repo advice, and
+    // thinking tokens share this budget. Too low and the JSON truncates.
+    maxTokens: 20000,
     build: ({ profileData, repos, resume, profile }) => ({
       system: `${SYSTEM_BASE}
 
@@ -679,19 +681,33 @@ Return:
 
   meta_optimize: {
     mode: "json",
-    maxTokens: 8000,
-    build: ({ stats, strategy, userFeedback }) => ({
-      system: SYSTEM_BASE,
-      user: `You can improve your own operating strategy. Current strategy addendum (injected into all your future prompts):
+    tier: "deep",
+    maxTokens: 12000,
+    build: ({ stats, strategy, userFeedback, funnel, github }) => ({
+      system: `${SYSTEM_BASE}
+
+You are revising the standing instructions that get injected into every other AI task in this app. Treat this as tuning a system prompt, not writing advice:
+- Output pure directives. No preamble, no "here is your strategy", no explanation inside the addendum itself.
+- Every line must change what a downstream task actually does. "Tailor the resume to the job" is worthless because it is already implied; "mirror the job description's exact noun phrases — 'React Native', not 'mobile development'" changes the output.
+- Improve on what is there. Do not delete a specific, working directive to replace it with a vaguer one, and do not restate the same rule in new words.
+- Prefer evidence over intuition. The channel weighting is load-bearing: cold applications convert at 1-2%, referrals at ~30%, and ~75% of resumes never reach a human. If the current strategy does not already reflect that, ADD it; if it does, keep it. Any revision that turns this back into "apply to more roles" is a regression.
+- Likewise for frontend specifics: GitHub is read before the resume, and interview loops are dominated by a practical component-building round. If those are missing, add them.`,
+      user: `Revise the operating strategy below.
 
 <current_addendum>
 ${strategy?.systemAddendum || "(empty — baseline)"}
 </current_addendum>
 
-Usage stats: ${JSON.stringify(stats)}
+Feature usage: ${JSON.stringify(stats)}
+${funnel ? `Actual results so far: ${JSON.stringify(funnel)}` : "No outcome data recorded yet."}
+${github ? `GitHub snapshot: ${JSON.stringify(github)}` : ""}
 User feedback: ${userFeedback || "(none)"}
 
-Write an improved "systemAddendum" (max 250 words) — concrete, current-best-practice directives that will make every future output better for this specific user: resume style rules that match 2026 ATS trends, Indian + global market realities for React devs, interview answer frameworks, salary negotiation angles. It must be pure instructions (no preamble). Also return "notes": 3-5 bullet points explaining what you changed in this evolution and why.`,
+Use the real numbers where they exist. If applications are going out but replies are near zero, the resume or the channel is the problem and the strategy should say so specifically. If referrals have not been attempted at all, weight the strategy toward that. If GitHub is thin, say what that costs and what to fix.
+
+Return:
+- "systemAddendum": the revised directives, maximum 320 words. Pure instructions.
+- "notes": 3-5 bullets on exactly what changed versus the current version and the reasoning — including anything you deliberately kept.`,
     }),
     schema: obj({ systemAddendum: str, notes: strArr }),
   },

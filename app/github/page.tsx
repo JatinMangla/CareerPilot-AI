@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 
@@ -213,12 +212,18 @@ export default function GithubPage() {
       )}
 
       {!review && !busy && !error && (
-        <div className="card-pad text-sm text-ink-400">
-          No audit yet. Your GitHub URL is also used to autofill applications — set it on the{" "}
-          <Link href="/evolve" className="text-neon-400 underline">
-            Evolve
-          </Link>{" "}
-          page.
+        <div className="card-pad space-y-3">
+          <h2 className="h2">What this checks</h2>
+          <ul className="text-sm text-ink-300 space-y-1.5 leading-relaxed">
+            <li>• Whether a recruiter can tell what you build in under a minute</li>
+            <li>• Repos missing descriptions, topics, READMEs or live demo links</li>
+            <li>• Clutter (practice/test repos) burying your real work</li>
+            <li>• A ready-to-paste profile README, and projects worth building next</li>
+          </ul>
+          <p className="text-xs text-ink-400 leading-relaxed">
+            Enter your username above and hit Review — nothing else to set up. Your profile
+            URL is saved automatically afterwards and reused to autofill job applications.
+          </p>
         </div>
       )}
     </div>

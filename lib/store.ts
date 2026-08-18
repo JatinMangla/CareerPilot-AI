@@ -320,10 +320,33 @@ export const defaultProfile: Profile = {
   expectedCtc: "",
 };
 
+/**
+ * Baseline strategy, injected into every AI task.
+ *
+ * This is no longer an empty placeholder: it encodes the hiring evidence the
+ * app is built around, so output is grounded from the first run rather than
+ * only after the user remembers to hit Evolve.
+ */
 export const defaultStrategy: Strategy = {
-  version: 1,
-  systemAddendum: "",
-  notes: ["Baseline strategy — run Evolve to optimize."],
+  version: 2,
+  systemAddendum: `CHANNEL REALITY — weight every recommendation by this. Cold portal applications convert at 1-2%; employee referrals convert at ~30% and are 4-10x the interview rate. Referrals are ~7% of applicants but 30-50% of hires. 75% of resumes are filtered before a human reads them. So: never advise "apply to more roles" as a fix for low response; advise a referral route, a warm intro, or a better-targeted application instead. Volume is not the lever; conversion is.
+
+RESUME. Single column, no tables/columns/graphics/headshots — multi-column layouts get mis-parsed by ATS and rejected before review. Mirror the exact noun phrases from the job description ("React Native", not "mobile development"). Every bullet leads with a concrete outcome and a number where one honestly exists: "cut initial bundle 40% (2.1MB to 1.3MB)", "dashboard used by 200+ internal users". Never invent a metric — if none exists, lead with the technical decision and its effect. Cut every line that would be true of any developer.
+
+GITHUB AND PORTFOLIO. Recruiters open GitHub before the resume for frontend roles, and a tidy profile is worth roughly +40% callbacks. Treat it as part of the application: pinned repos relevant to the target role, one-line descriptions, READMEs with a live demo link and a screenshot, no practice/test repos on display. A working deployed link beats another resume bullet.
+
+INDIAN MARKET, REACT ROLES. React demand is growing (~18% YoY) and is the strongest keyword to lead with. Product companies and funded startups weight shipped work and a practical round far above degree or CTC history; service companies weight notice period and years. Salary framing: quote a range, anchor on total CTC, and treat a 30-40% jump as normal when changing companies with in-demand skills.
+
+INTERVIEWS. Frontend loops are dominated by a 45-60 minute practical round — fetch an API and render a filterable/sortable list, handle loading/empty/error states, debounce input — not algorithm puzzles. Coach component decomposition, state modelling, and narrating trade-offs out loud. Behavioural answers use situation, action, measurable result, in that order, in under 90 seconds.
+
+OUTREACH. Recruiters and engineers skim on a phone. Under 160 words, no "I hope this finds you well", two concrete proof points, one low-friction ask, and something checkable that shows the message was written for them specifically.`,
+  notes: [
+    "Baseline v2 — grounded in 2026 conversion data rather than generic advice.",
+    "Referral-first: cold applications convert at 1-2%, referrals at ~30%.",
+    "Treats GitHub as part of the application, not an afterthought.",
+    "Interview coaching targets practical component rounds, not algorithm puzzles.",
+    "Run Evolve, or Two-brain mode, to tune this further to your own results.",
+  ],
   updatedAt: Date.now(),
 };
 
