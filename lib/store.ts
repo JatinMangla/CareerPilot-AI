@@ -13,6 +13,7 @@ import type {
   OutreachDraft,
   Strategy,
   UsageStats,
+  ImprovementBrief,
 } from "./types";
 
 const KEYS = {
@@ -27,6 +28,7 @@ const KEYS = {
   inbox: "cp_inbox",
   lastSync: "cp_last_sync",
   draft: "cp_outreach_draft",
+  brief: "cp_improve_brief",
   strategy: "cp_strategy",
   stats: "cp_stats",
 } as const;
@@ -390,6 +392,16 @@ export const store = {
 
   getLastSync: () => read<string | null>(KEYS.lastSync, null),
   setLastSync: (iso: string) => write(KEYS.lastSync, iso),
+
+  /**
+   * Hand the fixes from Validate Resume to the "Improve with AI" panel.
+   *
+   * Unlike the outreach draft this is not consumed on read — it stays until
+   * you clear it, so you can re-run the improvement or edit the list first.
+   */
+  getBrief: () => read<ImprovementBrief | null>(KEYS.brief, null),
+  setBrief: (b: ImprovementBrief) => write(KEYS.brief, b),
+  clearBrief: () => write<ImprovementBrief | null>(KEYS.brief, null),
 
   /** Hand a prefilled draft to the Outreach page. */
   setDraft: (d: OutreachDraft) => write(KEYS.draft, d),

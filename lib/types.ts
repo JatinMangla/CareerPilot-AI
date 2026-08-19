@@ -45,6 +45,23 @@ export interface ValidationResult {
   at: number;
 }
 
+/**
+ * The fixes carried from Validate Resume -> "Improve with AI".
+ *
+ * Kept structured (not one blob of text) so the resume page can list each
+ * point, let you drop the ones you disagree with, and rebuild the prompt.
+ */
+export interface ImprovementBrief {
+  /** Improvement points, verbatim from the validation. */
+  points: string[];
+  /** Keywords the resume is missing. */
+  keywords: string[];
+  /** Categories that scored badly — the AI gets the score and the feedback. */
+  weakAreas: ValidationCategory[];
+  /** When the validation that produced this ran. */
+  at: number;
+}
+
 export interface ProposedChange {
   id: string;
   section: string;
