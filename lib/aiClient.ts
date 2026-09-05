@@ -2,6 +2,7 @@
 
 import { store } from "./store";
 import { quota } from "./quota";
+import { stableStringify } from "./stableJson";
 
 // Gemini's free tier is the only provider, so the daily cap always applies.
 // This is a courtesy stop so you find out before Google starts refusing calls —
@@ -53,24 +54,67 @@ export async function streamTask(
   return full;
 }
 
+/**
+ * Identical JSON requests already in flight, so a double-click or a React strict
+ * mode double-invoke costs one API call instead of two. Cleared in `finally`, so
+ * a second call after the first settles starts fresh.
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
+export interface TaskOptions {
+  signal?: AbortSignal;
+  /** Bypass the server-side response cache — for an explicit "regenerate". */
+  fresh?: boolean;
+}
+
 export async function jsonTask<T>(
   task: string,
   input: Record<string, unknown>,
-  signal?: AbortSignal
+  options?: AbortSignal | TaskOptions
 ): Promise<T> {
+  // Kept back-compatible: callers used to pass an AbortSignal positionally.
+  const opts: TaskOptions =
+    options instanceof AbortSignal ? { signal: options } : options ?? {};
+
   preGuard();
   const strategy = store.getStrategy();
-  const res = await fetch("/api/ai", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ task, input, strategyAddendum: strategy.systemAddendum }),
-    signal,
-  });
-  if (!res.ok) {
-    throw new Error((await safeError(res)) || `AI request failed (${res.status})`);
+  const payload = {
+    task,
+    input,
+    strategyAddendum: strategy.systemAddendum,
+    ...(opts.fresh ? { fresh: true } : {}),
+  };
+
+  // A request carrying an abort signal is owned by one caller, so sharing its
+  // promise would let one component's abort cancel another's result.
+  const key = opts.signal || opts.fresh ? null : stableStringify(payload);
+  if (key) {
+    const existing = inFlight.get(key);
+    if (existing) return existing as Promise<T>;
   }
-  trackProvider(res);
-  return (await res.json()) as T;
+
+  const run = (async () => {
+    const res = await fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: opts.signal,
+    });
+    if (!res.ok) {
+      throw new Error((await safeError(res)) || `AI request failed (${res.status})`);
+    }
+    trackProvider(res);
+    return (await res.json()) as T;
+  })();
+
+  if (!key) return run;
+
+  inFlight.set(key, run);
+  try {
+    return await run;
+  } finally {
+    inFlight.delete(key);
+  }
 }
 
 async function safeError(res: Response): Promise<string | null> {

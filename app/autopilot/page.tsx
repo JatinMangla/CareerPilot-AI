@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask, streamTask } from "@/lib/aiClient";
+import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { detectAts, isVerifiedSource } from "@/lib/ats";
 import type { AutoTailorPlan, Job, QueuedApplication } from "@/lib/types";
 
@@ -65,50 +66,51 @@ export default function AutoPilotPage() {
     setBusy(true);
     const next = [...queue];
     try {
-      for (let i = 0; i < targets.length; i++) {
-        const job = targets[i];
-        setProgress(`Tailoring ${i + 1}/${targets.length}: ${job.title} @ ${job.company}…`);
+      // Ten independent deep-tier passes ran back to back here, so the wait was
+      // the sum of all ten. Overlap them; the per-job failure handling below is
+      // unchanged, since mapPool reports errors per item instead of throwing.
+      const profile = store.getProfile();
+      const outcomes = await mapPool(
+        targets,
+        AI_CONCURRENCY,
+        (job) =>
+          jsonTask<AutoTailorPlan>("auto_tailor", { resume: resume.text, job, profile }),
+        (done, total) => setProgress(`Tailoring… ${done}/${total} done`)
+      );
+
+      for (const { item: job, value: plan, error } of outcomes) {
         const ats = detectAts(job.url);
-        try {
-          const plan = await jsonTask<AutoTailorPlan>("auto_tailor", {
-            resume: resume.text,
-            job,
-            profile: store.getProfile(),
-          });
+        const base = {
+          jobId: job.id,
+          title: job.title,
+          company: job.company,
+          url: job.url,
+          atsKind: ats.kind,
+          atsLabel: ats.label,
+          autoSubmit: ats.autoSubmit,
+          approvedClaimIds: [],
+          at: Date.now(),
+        };
+
+        if (plan) {
           const needsApproval = (plan.newClaims?.length || 0) > 0;
           next.push({
-            jobId: job.id,
-            title: job.title,
-            company: job.company,
-            url: job.url,
-            atsKind: ats.kind,
-            atsLabel: ats.label,
-            autoSubmit: ats.autoSubmit,
+            ...base,
             status: needsApproval ? "needs_approval" : "approved",
             plan,
-            approvedClaimIds: [],
             finalResume: plan.tailoredResume,
-            at: Date.now(),
           });
-        } catch (err: any) {
+        } else {
           next.push({
-            jobId: job.id,
-            title: job.title,
-            company: job.company,
-            url: job.url,
-            atsKind: ats.kind,
-            atsLabel: ats.label,
-            autoSubmit: ats.autoSubmit,
+            ...base,
             status: "failed",
             plan: null,
-            approvedClaimIds: [],
             finalResume: "",
-            error: err.message,
-            at: Date.now(),
+            error: error?.message || "Tailoring failed",
           });
         }
-        saveQueue(next);
       }
+      saveQueue(next);
     } finally {
       setBusy(false);
       setProgress("");

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
+import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { OUTCOME_STAGES, type Job, type OutcomeStage, type PreparedApplication, type Profile } from "@/lib/types";
 
 const ALL_PORTALS = [
@@ -84,14 +85,26 @@ export default function AutoApplyPage() {
     const portal = profile?.portals[0] || "LinkedIn";
     const next = [...apps];
     try {
-      for (let i = 0; i < targets.length; i++) {
-        const job = targets[i];
-        setProgress(`Preparing ${i + 1}/${targets.length}: ${job.title} @ ${job.company}…`);
-        const prep = await jsonTask<{
-          coverLetter: string;
-          tailoredHighlights: string[];
-          screeningAnswers: { question: string; answer: string }[];
-        }>("prepare_application", { resume: resume.text, job, portal });
+      /*
+       * These were prepared one at a time, so ten jobs meant ten deep-tier round
+       * trips end to end — minutes of spinner. They are independent, so overlap
+       * them. A failure no longer abandons the rest either: mapPool collects
+       * per-job errors instead of throwing out of the loop.
+       */
+      const outcomes = await mapPool(
+        targets,
+        AI_CONCURRENCY,
+        (job) =>
+          jsonTask<{
+            coverLetter: string;
+            tailoredHighlights: string[];
+            screeningAnswers: { question: string; answer: string }[];
+          }>("prepare_application", { resume: resume.text, job, portal }),
+        (done, total) => setProgress(`Preparing applications… ${done}/${total} done`)
+      );
+
+      for (const { item: job, value: prep } of outcomes) {
+        if (!prep) continue;
         next.push({
           jobId: job.id,
           jobTitle: job.title,
@@ -104,9 +117,17 @@ export default function AutoApplyPage() {
           screeningAnswers: prep.screeningAnswers,
           at: Date.now(),
         });
-        store.setApps(next);
         store.bumpStat("applicationsPrepared");
-        setApps([...next]);
+      }
+      store.setApps(next);
+      setApps([...next]);
+
+      const failed = outcomes.filter((o) => o.error);
+      if (failed.length) {
+        setError(
+          `${failed.length} of ${targets.length} could not be prepared (${failed[0].error!.message}). ` +
+            `The rest are ready — select the failed ones and run again.`
+        );
       }
     } catch (err: any) {
       setError(err.message);

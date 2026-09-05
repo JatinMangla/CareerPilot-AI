@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
+import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import type { InboxMessage, MailCategory } from "@/lib/types";
 
 const TABS: { key: MailCategory | "all" | "action"; label: string; hint: string }[] = [
@@ -99,18 +100,21 @@ export default function InboxPage() {
         );
       }
 
-      // Classify in batches so one huge AI call can't fail everything.
+      // Classify in batches so one huge AI call can't fail everything, and run a
+      // few batches at once — a 300-mail sync used to be 25 round trips end to end.
       setProgress(`Reading ${fresh.length} emails…`);
       const profile = store.getProfile();
       const classified: Record<string, any> = {};
       const BATCH = 12;
-      for (let i = 0; i < fresh.length; i += BATCH) {
-        const slice = fresh.slice(i, i + BATCH);
-        setProgress(
-          `Sorting job mail… ${Math.min(i + BATCH, fresh.length)}/${fresh.length}`
-        );
-        try {
-          const out = await jsonTask<{ results: any[] }>("classify_inbox", {
+
+      const batches: InboxMessage[][] = [];
+      for (let i = 0; i < fresh.length; i += BATCH) batches.push(fresh.slice(i, i + BATCH));
+
+      const outcomes = await mapPool(
+        batches,
+        AI_CONCURRENCY,
+        (slice) =>
+          jsonTask<{ results: any[] }>("classify_inbox", {
             profile,
             emails: slice.map((m) => ({
               uid: m.uid,
@@ -119,11 +123,17 @@ export default function InboxPage() {
               date: m.date,
               snippet: m.snippet,
             })),
-          });
-          for (const r of out.results || []) classified[r.uid] = r;
-        } catch (err: any) {
-          setError(`Some mail couldn't be sorted: ${err.message}`);
-        }
+          }),
+        (done) =>
+          setProgress(`Sorting job mail… ${Math.min(done * BATCH, fresh.length)}/${fresh.length}`)
+      );
+
+      for (const outcome of outcomes) {
+        for (const r of outcome.value?.results || []) classified[r.uid] = r;
+      }
+      const failed = outcomes.filter((o) => o.error);
+      if (failed.length) {
+        setError(`Some mail couldn't be sorted: ${failed[0].error!.message}`);
       }
 
       const merged: InboxMessage[] = fresh.map((m) => ({
