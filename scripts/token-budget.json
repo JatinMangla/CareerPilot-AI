@@ -1,0 +1,81 @@
+{
+  "tolerance": 0.15,
+  "tasks": {
+    "analyze_jobs": {
+      "inputTokens": 2136,
+      "maxTokens": 16000
+    },
+    "auto_tailor": {
+      "inputTokens": 1947,
+      "maxTokens": 20000
+    },
+    "referral_plan": {
+      "inputTokens": 1922,
+      "maxTokens": 12000
+    },
+    "classify_inbox": {
+      "inputTokens": 1765,
+      "maxTokens": 8000
+    },
+    "github_review": {
+      "inputTokens": 1517,
+      "maxTokens": 20000
+    },
+    "compose_email": {
+      "inputTokens": 1485,
+      "maxTokens": 8000
+    },
+    "prepare_application": {
+      "inputTokens": 1481,
+      "maxTokens": 8000
+    },
+    "tailor_plan": {
+      "inputTokens": 1455,
+      "maxTokens": 8000
+    },
+    "apply_tailor": {
+      "inputTokens": 1358,
+      "maxTokens": 32000
+    },
+    "find_jobs": {
+      "inputTokens": 1303,
+      "maxTokens": 16000
+    },
+    "improve_resume": {
+      "inputTokens": 1174,
+      "maxTokens": 32000
+    },
+    "interview_turn": {
+      "inputTokens": 1163,
+      "maxTokens": 4000
+    },
+    "meta_optimize": {
+      "inputTokens": 1075,
+      "maxTokens": 12000
+    },
+    "merge_claims": {
+      "inputTokens": 1064,
+      "maxTokens": 20000
+    },
+    "validate_resume": {
+      "inputTokens": 1063,
+      "maxTokens": 8000
+    },
+    "merge_strategies": {
+      "inputTokens": 603,
+      "maxTokens": 8000
+    },
+    "practice_question": {
+      "inputTokens": 536,
+      "maxTokens": 8000
+    },
+    "review_solution": {
+      "inputTokens": 319,
+      "maxTokens": 8000
+    },
+    "interview_feedback": {
+      "inputTokens": 307,
+      "maxTokens": 8000
+    }
+  }
+}
