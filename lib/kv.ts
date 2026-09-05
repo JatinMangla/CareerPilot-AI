@@ -135,6 +135,23 @@ export async function incrWithExpiry(key: string, ttlSec: number): Promise<numbe
   return Number(typeof count === "object" ? count?.result : count) || 0;
 }
 
+/**
+ * Plain expiring string keys, outside the state hash.
+ *
+ * Everything else here lives in one hash because it is all user state that syncs
+ * together. The AI response cache is not user state — it is disposable, it must
+ * expire on its own, and it must never be picked up by readAll() and pushed into
+ * a browser. So it gets its own top-level keys.
+ */
+export async function getString(key: string): Promise<string | null> {
+  const value = await command(["GET", key]);
+  return typeof value === "string" ? value : null;
+}
+
+export async function setString(key: string, value: string, ttlSec: number): Promise<void> {
+  await command(["SET", key, value, "EX", ttlSec]);
+}
+
 export async function clearAll(): Promise<void> {
   await command(["DEL", HASH]);
 }

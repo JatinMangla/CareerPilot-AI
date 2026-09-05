@@ -1,5 +1,6 @@
 import { tasks } from "@/lib/prompts";
 import { geminiJson, geminiStream } from "@/lib/gemini";
+import { cacheKey, readCache, writeCache } from "@/lib/aiCache";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel clamps this to the plan limit
@@ -22,7 +23,13 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { task?: string; input?: Record<string, any>; strategyAddendum?: string };
+  let body: {
+    task?: string;
+    input?: Record<string, any>;
+    strategyAddendum?: string;
+    /** Set by a "regenerate" action to bypass a cached answer. */
+    fresh?: boolean;
+  };
   try {
     body = await req.json();
   } catch {
@@ -55,6 +62,28 @@ export async function POST(req: Request) {
     );
   }
 
+  /*
+   * Cached answers cost nothing, so they must NOT advertise a provider call:
+   * lib/aiClient.ts bumps the free-tier counter off the x-ai-provider header, and
+   * charging the user's daily quota for a response we never asked Gemini for is
+   * how a guard stops being trustworthy.
+   */
+  const ttl = def.cacheTtl ?? 0;
+  const key = ttl > 0 ? cacheKey(body.task!, body.input || {}, body.strategyAddendum) : null;
+
+  if (key && !body.fresh) {
+    const hit = await readCache(key);
+    if (hit) {
+      return new Response(hit, {
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "x-ai-cache": "hit",
+          "x-ai-tier": tier,
+        },
+      });
+    }
+  }
+
   try {
     const json = await geminiJson(
       systemPrompt,
@@ -63,11 +92,13 @@ export async function POST(req: Request) {
       def.schema!,
       tier
     );
+    if (key) await writeCache(key, json, ttl);
     return new Response(json, {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "x-ai-provider": "gemini",
         "x-ai-tier": tier,
+        "x-ai-cache": key ? "miss" : "off",
       },
     });
   } catch (err: any) {

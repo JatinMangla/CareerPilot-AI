@@ -1,3 +1,5 @@
+import type { Profile } from "./types";
+
 /**
  * Server-side task registry for /api/ai.
  * Each task defines: mode ("stream" = plain text stream, "json" = structured output),
@@ -20,18 +22,54 @@ export interface TaskDef {
   maxTokens?: number;
   /** Defaults to "standard" when unset. */
   tier?: TaskTier;
+  /**
+   * Seconds to cache the response for, keyed by task + input + strategy.
+   * Only set this where the same input genuinely means the same answer. Anything
+   * the user re-runs expecting a different result — tailoring, cover letters,
+   * outreach drafts, interview turns — must stay uncached. Streams are never
+   * cached regardless of this value.
+   */
+  cacheTtl?: number;
   build: (input: Record<string, any>) => { system: string; user: string };
   schema?: Record<string, any>;
 }
 
-export const SYSTEM_BASE = `You are CareerPilot AI — an elite career copilot for Jatin Mangla, a frontend web developer (JavaScript, TypeScript, HTML, CSS, React, Tailwind CSS, Redux, Git, basic Node.js) who worked on the Mera Monitor website.
-
-Your standards:
+/** The half of the system prompt that is identical for every task and every user. */
+const STANDARDS = `Your standards:
 - Resume advice follows current ATS best practices: strong action verbs, quantified impact, relevant keywords, clean single-column structure, no fluff.
 - You are direct and specific. Never generic filler like "team player with good communication skills".
 - Everything you produce should be immediately usable — real sentences, real bullet points, real answers.
 - When information is missing, make the most reasonable assumption for an Indian frontend developer with ~1-3 years of experience, and clearly mark assumptions with [confirm].
 - Never fabricate employers, degrees, or dates that were not provided.`;
+
+/** The identity the app shipped with, used when a task has no profile to hand. */
+const DEFAULT_IDENTITY =
+  "an elite career copilot for Jatin Mangla, a frontend web developer (JavaScript, TypeScript, HTML, CSS, React, Tailwind CSS, Redux, Git, basic Node.js) who worked on the Mera Monitor website";
+
+/**
+ * The system prompt for a task, describing the user the app actually has.
+ *
+ * The identity used to be hardcoded into a single constant shared by all 19
+ * tasks, which meant editing your profile in the app changed nothing the model
+ * saw — every prompt kept asserting the original name, role and skill list. Pass
+ * the profile where a task has one and it describes the real user; tasks without
+ * a profile fall back to the shipped text, so nothing regresses.
+ *
+ * Target roles are included because they steer almost every task (what to
+ * emphasise, which keywords matter, what an interview will actually cover) and
+ * were previously invisible to the model unless a task happened to paste the
+ * whole profile into the user message.
+ */
+export function systemBase(profile?: Partial<Profile>): string {
+  if (!profile?.name || !profile?.role) return `You are CareerPilot AI — ${DEFAULT_IDENTITY}.\n\n${STANDARDS}`;
+
+  const skills = profile.skills?.length ? ` (${profile.skills.join(", ")})` : "";
+  const targets = profile.desiredRoles ? ` They are targeting: ${profile.desiredRoles}.` : "";
+  return `You are CareerPilot AI — an elite career copilot for ${profile.name}, a ${profile.role}${skills}.${targets}\n\n${STANDARDS}`;
+}
+
+/** Fallback for the tasks that never receive a profile. */
+export const SYSTEM_BASE = systemBase();
 
 const str = { type: "string" } as const;
 const strArr = { type: "array", items: { type: "string" } } as const;
@@ -70,7 +108,7 @@ export const tasks: Record<string, TaskDef> = {
     tier: "deep", // this text goes in front of employers
     maxTokens: 32000,
     build: ({ resume, profile, instructions }) => ({
-      system: SYSTEM_BASE,
+      system: systemBase(profile),
       user: `Here is my current resume:
 
 <resume>
@@ -89,6 +127,9 @@ Output ONLY the full improved resume in clean plain text (section headers in CAP
   validate_resume: {
     mode: "json",
     maxTokens: 8000,
+    // The same resume scores the same. Re-running the audit after an edit
+    // changes the input, so a real re-check is never served from here.
+    cacheTtl: 86400,
     build: ({ resume }) => ({
       system: SYSTEM_BASE,
       user: `Evaluate this resume against current industry standards for frontend developer roles in India and globally (ATS compatibility, impact quantification, keyword coverage, structure, readability, seniority signaling):
@@ -175,7 +216,7 @@ Output ONLY the final tailored resume in clean plain text (section headers in CA
     mode: "json",
     maxTokens: 16000,
     build: ({ resume, profile, count, focus }) => ({
-      system: SYSTEM_BASE,
+      system: systemBase(profile),
       user: `Based on my resume and profile, list ${count || 8} realistic, currently-plausible job openings that fit me.
 
 ${
@@ -200,6 +241,9 @@ Be honest in cons — e.g. "requires 3+ yrs, you may be screened out". These are
   analyze_jobs: {
     mode: "json",
     maxTokens: 16000,
+    // Listings and resume are both in the key, so this only hits when the user
+    // reloads the same search — which is exactly when it should.
+    cacheTtl: 21600,
     build: ({ jobs, resume }) => ({
       system: SYSTEM_BASE,
       user: `Here are real job listings fetched from a job API, plus my resume. Analyze each for me.
@@ -223,7 +267,7 @@ Return the same jobs enriched: keep id/title/company/location/url/description/so
     tier: "deep", // may be submitted without further review
     maxTokens: 20000,
     build: ({ resume, job, profile }) => ({
-      system: `${SYSTEM_BASE}
+      system: `${systemBase(profile)}
 
 You are preparing an application that may be SUBMITTED AUTOMATICALLY without further human review. Integrity rules are absolute:
 - A "safeChange" only rewords, reorders, or re-emphasizes experience that ALREADY EXISTS in the resume. Changing "Built dashboards" to "Built responsive React dashboards used by 200+ users" is only safe if BOTH the React work and the user count already appear in the resume.
@@ -445,7 +489,7 @@ Judge correctness by mentally executing it against the examples and edge cases. 
     mode: "json",
     maxTokens: 8000,
     build: ({ mode, role, company, toEmail, context, resume, profile, tone }) => ({
-      system: `${SYSTEM_BASE}
+      system: `${systemBase(profile)}
 
 You are writing a real email that will be sent from ${profile?.email || "the candidate's"} Gmail to a hiring manager or HR contact. Rules:
 - Recruiters skim on a phone. Keep the body under 160 words, short paragraphs, no walls of text.
@@ -495,7 +539,7 @@ Return:
     tier: "deep",
     maxTokens: 12000,
     build: ({ job, resume, profile }) => ({
-      system: `${SYSTEM_BASE}
+      system: `${systemBase(profile)}
 
 You are helping with a referral request, which converts roughly 15× better than a cold application — referred candidates are ~30% likely to reach interview versus 1-2% for applying through a portal.
 
@@ -543,11 +587,13 @@ Give me:
   github_review: {
     mode: "json",
     tier: "deep",
+    // A GitHub profile does not change between two clicks of the audit button.
+    cacheTtl: 21600,
     // Generous: this returns a full profile README plus per-repo advice, and
     // thinking tokens share this budget. Too low and the JSON truncates.
     maxTokens: 20000,
     build: ({ profileData, repos, resume, profile }) => ({
-      system: `${SYSTEM_BASE}
+      system: `${systemBase(profile)}
 
 You are auditing a frontend developer's public GitHub the way a recruiter or hiring manager actually does: they open it BEFORE reading the resume, spend well under a minute, and decide whether this person ships real work. An optimised profile is worth roughly a 40% lift in callbacks.
 
@@ -601,8 +647,11 @@ Return:
     mode: "json",
     tier: "fast", // bucketing email; runs ~27× per sync
     maxTokens: 8000,
+    // The highest-value cache in the app: a re-sync re-classifies mail it has
+    // already seen, and mail does not change after it arrives.
+    cacheTtl: 604800,
     build: ({ emails, profile }) => ({
-      system: `${SYSTEM_BASE}
+      system: `${systemBase(profile)}
 
 You are triaging a job-seeker's inbox. Be decisive and accurate — they rely on this instead of reading Gmail themselves. Categories:
 - "applied_reply": a response to an application THEY submitted (interview invite, assessment link, status update, rejection, recruiter following up on their application).
@@ -652,7 +701,7 @@ For each email return:
     mode: "json",
     maxTokens: 8000,
     build: ({ current, claudeOutput, profile, stats }) => ({
-      system: `${SYSTEM_BASE}
+      system: `${systemBase(profile)}
 
 You are merging two independently written strategy documents into one. Both were written to guide an AI job-search assistant for this candidate. Your job is synthesis, not diplomacy:
 - Keep the sharpest, most specific, most actionable directive when the two overlap. Never keep both versions of the same idea.
