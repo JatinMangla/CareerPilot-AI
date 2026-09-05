@@ -1,0 +1,56 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(./**)",
+      "Glob",
+      "Grep",
+      "Bash(node scripts/*.mjs)",
+      "Bash(node scripts/*.mjs:*)",
+      "Bash(node scripts/hooks/*.mjs:*)",
+      "Bash(node node_modules/typescript/bin/tsc:*)",
+      "Bash(node node_modules/next/dist/bin/next build)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git stash list)",
+      "Bash(git remote -v)"
+    ],
+    "deny": [
+      "Read(./.env.local)",
+      "Read(./.env)",
+      "Read(./.vercel/**)",
+      "Bash(git push --force:*)",
+      "Bash(vercel env pull:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git commit:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/guard-bash.mjs"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/after-edit.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}

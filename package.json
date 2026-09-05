@@ -9,7 +9,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "check": "node scripts/check.mjs",
+    "check:fast": "node scripts/check.mjs --fast",
+    "doctor": "node scripts/doctor.mjs",
+    "tokens": "node scripts/ai-cost.mjs",
+    "tokens:check": "node scripts/ai-cost.mjs --check",
+    "map": "node scripts/repo-map.mjs && node scripts/dep-graph.mjs",
+    "tree": "node scripts/tree.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",

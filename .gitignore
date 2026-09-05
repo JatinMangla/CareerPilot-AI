@@ -16,3 +16,6 @@ agent/node_modules/
 agent/apply-queue.json
 agent/results.json
 agent/screenshots/
+
+# Claude Code per-user overrides (project config in .claude/settings.json IS committed)
+.claude/settings.local.json
