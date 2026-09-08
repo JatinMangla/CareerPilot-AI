@@ -64,17 +64,29 @@ when Redis is not configured.
 
 - **Gemini is the only provider.** The Anthropic path was deliberately removed. Do not
   reintroduce `@anthropic-ai/sdk`.
-- **`thinkingLevel` must stay per-model.** It returns `400 INVALID_ARGUMENT` on
-  `gemini-2.5-flash`, which is the last link in every fallback chain.
+- **`thinkingLevel` must stay per-model.** The 2.5-era models return `400 INVALID_ARGUMENT`
+  on it. Nothing in the chains is 2.5-era now — `gemini-2.5-flash` was retired mid-2026 and
+  answers `404 "no longer available to new users"` for any newly created key — but the
+  per-model flag is what lets an older model be pinned back into a chain safely.
 - **Gemini's `responseSchema` is an OpenAPI subset.** It rejects `additionalProperties` and
   `$schema`; `toGeminiSchema` in `lib/gemini.ts` strips them. Build schemas with the `obj`
   helper in `lib/prompts.ts`.
 - **Write endpoints use POST, never PUT.** This Vercel deployment returns 405 on PUT before
   the handler runs.
-- **No bot submission to LinkedIn / Naukri / Indeed.** Against their ToS and risks the user's
-  account. The auto-apply agent has a hard blocklist and only touches company ATS boards
+- **Nothing submits an application.** The agent and the UI prepare everything and then
+  open each application in a tab for the user to submit. Auto-submission was removed on
+  request: a sent application cannot be recalled, so a mis-parsed field becomes permanent.
+  Do not add it back.
+- **No bot interaction with LinkedIn / Naukri / Indeed.** Against their ToS and risks the
+  user's account. The agent has a hard blocklist and only opens company ATS boards
   (Greenhouse, Lever, Ashby, Workable).
-- **AI-invented job listings must never reach the apply agent.** `isVerifiedSource` gates this.
+- **AI-invented job listings must never reach the apply pipeline.** `isVerifiedSource`
+  gates this, and `app/jobs/page.tsx` re-stamps `id`/`url`/`source` from the fetched
+  listing after scoring so the model cannot launder a guess into a verified source.
+- **Paid/republisher job sites are never shown.** `BLOCKED_JOB_HOSTS` in `lib/jobFilters.ts`
+  (bebee.com and friends) — they wall the application behind a payment or signup.
+- **Job identity is `fingerprint()`, not `id`.** Every search mints new ids, so dedupe and
+  the user's "not interested" list are both keyed on company + normalized title.
 - **Never print or commit secrets.** `.env.local` holds live credentials; `scripts/doctor.mjs`
   reports whether a variable is set without revealing it. When piping a secret to
   `vercel env add` on Windows, pipe from a file via `cmd /c` — PowerShell pipes append `\r`

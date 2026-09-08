@@ -14,13 +14,16 @@ import type {
   Strategy,
   UsageStats,
   ImprovementBrief,
+  DismissedJob,
 } from "./types";
+import { fingerprint, sourceRank } from "./jobFilters";
 
 const KEYS = {
   resume: "cp_resume",
   profile: "cp_profile",
   validation: "cp_validation",
   jobs: "cp_jobs",
+  dismissed: "cp_dismissed",
   apps: "cp_apps",
   queue: "cp_queue",
   emails: "cp_emails",
@@ -374,6 +377,100 @@ export const store = {
 
   getJobs: () => read<Job[]>(KEYS.jobs, []),
   setJobs: (j: Job[]) => write(KEYS.jobs, j),
+
+  /* ---------- Removed jobs ----------
+   *
+   * "I removed this job and it keeps coming back" was two bugs at once:
+   * removing a prepared application only deleted the application, leaving the
+   * job in the match list to be offered again; and the match list was keyed by
+   * a per-search id, so even a job-level removal stopped matching as soon as
+   * the next search minted a new id for the same posting. Both are fixed by
+   * keeping a dismissal list keyed by fingerprint and filtering every list
+   * through it. */
+  getDismissed: () => read<DismissedJob[]>(KEYS.dismissed, []),
+
+  isDismissed: (job: { title?: string; company?: string }) => {
+    const fp = fingerprint(job);
+    return read<DismissedJob[]>(KEYS.dismissed, []).some((d) => d.fp === fp);
+  },
+
+  dismissJob: (job: { title?: string; company?: string }) => {
+    const fp = fingerprint(job);
+    const list = read<DismissedJob[]>(KEYS.dismissed, []);
+    if (!list.some((d) => d.fp === fp)) {
+      list.push({
+        fp,
+        title: job.title || "",
+        company: job.company || "",
+        at: Date.now(),
+      });
+      write(KEYS.dismissed, list);
+    }
+    // Drop it from the visible match list too, so it disappears immediately
+    // rather than at the next search.
+    const jobs = read<Job[]>(KEYS.jobs, []).filter((j) => fingerprint(j) !== fp);
+    write(KEYS.jobs, jobs);
+    return jobs;
+  },
+
+  undismiss: (fp: string) =>
+    write(
+      KEYS.dismissed,
+      read<DismissedJob[]>(KEYS.dismissed, []).filter((d) => d.fp !== fp)
+    ),
+
+  clearDismissed: () => write<DismissedJob[]>(KEYS.dismissed, []),
+
+  /**
+   * Merges a fresh search into the saved matches.
+   *
+   * `setJobs` replaced the whole list, so every search threw away the previous
+   * one — including anything already queued in Auto-Apply or Auto-Pilot, whose
+   * cards then lost the job they referred to. Merging keeps the history,
+   * refreshes anything re-found, and drops what the user has dismissed.
+   */
+  addJobs: (incoming: Job[]) => {
+    const dismissed = new Set(
+      read<DismissedJob[]>(KEYS.dismissed, []).map((d) => d.fp)
+    );
+    const merged = read<Job[]>(KEYS.jobs, []);
+    const index = new Map(merged.map((j, i) => [fingerprint(j), i]));
+    let added = 0;
+
+    for (const job of incoming) {
+      const fp = fingerprint(job);
+      if (dismissed.has(fp)) continue;
+      const at = index.get(fp);
+      if (at === undefined) {
+        index.set(fp, merged.length);
+        merged.push({ ...job, foundAt: job.foundAt ?? Date.now() });
+        added++;
+      } else {
+        /*
+         * Re-found. Take the newer analysis, keep the original discovery date —
+         * and keep whichever copy has the better origin. Without that last part
+         * a later "Job portals" search would overwrite a job found on the
+         * company's own Greenhouse board with Adzuna's redirect to it, quietly
+         * turning a one-click direct application into a portal round-trip.
+         */
+        const prev = merged[at];
+        const keepPrevOrigin = sourceRank(prev.source) > sourceRank(job.source);
+        merged[at] = {
+          ...prev,
+          ...job,
+          foundAt: prev.foundAt ?? Date.now(),
+          // The id is this app's own handle for the job: prepared applications
+          // and the Auto-Pilot queue reference it, and re-keying it here would
+          // orphan them and re-offer a job that is already queued.
+          id: prev.id,
+          ...(keepPrevOrigin ? { url: prev.url, source: prev.source } : {}),
+        };
+      }
+    }
+
+    write(KEYS.jobs, merged);
+    return { jobs: merged, added };
+  },
 
   getApps: () => read<PreparedApplication[]>(KEYS.apps, []),
   setApps: (a: PreparedApplication[]) => write(KEYS.apps, a),

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Local browser agent that submits CareerPilot applications on official company career sites.",
+  "description": "Local browser agent that opens and fills CareerPilot applications on official company career sites. Never submits.",
   "scripts": {
     "postinstall": "playwright install chromium",
     "apply": "node apply.mjs"

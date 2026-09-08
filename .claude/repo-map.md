@@ -2,7 +2,7 @@
 
 <!-- GENERATED FILE. Do not edit by hand: node scripts/repo-map.mjs -->
 
-_62 source files · 15 pages · 11 API routes · 19 AI tasks · generated 2026-09-05_
+_65 source files · 15 pages · 11 API routes · 19 AI tasks · generated 2026-09-08_
 
 **Read this before exploring.** It is regenerated from the source, so it does not drift.
 For import relationships see [docs/dep-graph.md](../docs/dep-graph.md).
@@ -30,12 +30,21 @@ cross-device sync.
 |   |   |-- ship.md
 |   |   `-- tokens.md
 |   |-- repo-map.md
-|   `-- settings.json
+|   |-- settings.json
+|   `-- settings.local.json
 |-- agent/   # local Playwright auto-apply runner (separate install)
+|   |-- screenshots/
+|   |   |-- 01_Luxoft.png
+|   |   |-- 02_MongoDB.png
+|   |   |-- 03_Luxoft.png
+|   |   |-- 04_Barclays.png
+|   |   |-- 05_Zencommerce_India_Private_Limited.png
+|   |   `-- 07_KS_Legal_Associates.png
 |   |-- README.md
-|   |-- apply.mjs  (547)
+|   |-- apply.mjs  (548)
 |   |-- fields.mjs  (154)
 |   |-- package.json
+|   |-- results.json
 |   `-- test-fixture.html
 |-- app/   # Next.js App Router — pages and API routes
 |   |-- api/   # server endpoints (deploy as Vercel serverless functions)
@@ -59,15 +68,15 @@ cross-device sync.
 |   |   |   `-- sync/
 |   |   |       `-- route.ts  (147)
 |   |   |-- jobs/
-|   |   |   `-- route.ts  (145)
+|   |   |   `-- route.ts  (253)
 |   |   |-- parse-resume/
 |   |   |   `-- route.ts  (49)
 |   |   `-- state/
 |   |       `-- route.ts  (113)
 |   |-- auto-apply/
-|   |   `-- page.tsx  (471)
+|   |   `-- page.tsx  (558)
 |   |-- autopilot/
-|   |   `-- page.tsx  (625)
+|   |   `-- page.tsx  (763)
 |   |-- evolve/
 |   |   `-- page.tsx  (466)
 |   |-- github/
@@ -77,7 +86,7 @@ cross-device sync.
 |   |-- interview/
 |   |   `-- page.tsx  (347)
 |   |-- jobs/
-|   |   `-- page.tsx  (312)
+|   |   `-- page.tsx  (566)
 |   |-- login/
 |   |   `-- page.tsx  (221)
 |   |-- outreach/
@@ -107,19 +116,22 @@ cross-device sync.
 |   |   `-- resumeDoc.tsx  (261)
 |   |-- aiCache.ts  (61)
 |   |-- aiClient.ts  (128)
-|   |-- ats.ts  (179)
+|   |-- ats.ts  (187)
 |   |-- auth.ts  (145)
 |   |-- claudePrompt.ts  (103)
-|   |-- companyBoards.ts  (213)
-|   |-- gemini.ts  (335)
+|   |-- companyBoards.ts  (384)
+|   |-- gemini.ts  (346)
+|   |-- jobFilters.ts  (177)
 |   |-- kv.ts  (158)
+|   |-- openTabs.ts  (48)
 |   |-- pool.ts  (68)
-|   |-- prompts.ts  (764)
+|   |-- prompts.ts  (773)
 |   |-- quota.ts  (78)
 |   |-- rateLimit.ts  (39)
+|   |-- roleSuggestions.ts  (88)
 |   |-- stableJson.ts  (22)
-|   |-- store.ts  (425)
-|   `-- types.ts  (295)
+|   |-- store.ts  (522)
+|   `-- types.ts  (315)
 |-- scripts/   # repo tooling — run with plain node, no npm
 |   |-- hooks/
 |   |   |-- after-edit.mjs  (63)
@@ -150,13 +162,13 @@ cross-device sync.
 | URL | File | Lines |
 | --- | --- | --- |
 | `/` | [app/page.tsx](../app/page.tsx) | 276 |
-| `/auto-apply` | [app/auto-apply/page.tsx](../app/auto-apply/page.tsx) | 471 |
-| `/autopilot` | [app/autopilot/page.tsx](../app/autopilot/page.tsx) | 625 |
+| `/auto-apply` | [app/auto-apply/page.tsx](../app/auto-apply/page.tsx) | 558 |
+| `/autopilot` | [app/autopilot/page.tsx](../app/autopilot/page.tsx) | 763 |
 | `/evolve` | [app/evolve/page.tsx](../app/evolve/page.tsx) | 466 |
 | `/github` | [app/github/page.tsx](../app/github/page.tsx) | 243 |
 | `/inbox` | [app/inbox/page.tsx](../app/inbox/page.tsx) | 378 |
 | `/interview` | [app/interview/page.tsx](../app/interview/page.tsx) | 347 |
-| `/jobs` | [app/jobs/page.tsx](../app/jobs/page.tsx) | 312 |
+| `/jobs` | [app/jobs/page.tsx](../app/jobs/page.tsx) | 566 |
 | `/login` | [app/login/page.tsx](../app/login/page.tsx) | 221 |
 | `/outreach` | [app/outreach/page.tsx](../app/outreach/page.tsx) | 405 |
 | `/practice` | [app/practice/page.tsx](../app/practice/page.tsx) | 252 |
@@ -228,20 +240,23 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | [components/UsageBanner.tsx](../components/UsageBanner.tsx) | 43 | UsageBanner | 1 |
 | [lib/aiCache.ts](../lib/aiCache.ts) | 61 | cacheKey, readCache, writeCache | 1 |
 | [lib/aiClient.ts](../lib/aiClient.ts) | 128 | TaskOptions, jsonTask, streamTask | 13 |
-| [lib/ats.ts](../lib/ats.ts) | 179 | AtsInfo, AtsKind, atsBadgeTone, detectAts, isVerifiedSource | 2 |
+| [lib/ats.ts](../lib/ats.ts) | 187 | AtsInfo, AtsKind, atsBadgeTone, detectAts, isVerifiedSource | 2 |
 | [lib/auth.ts](../lib/auth.ts) | 145 | OTP_COOKIE, OTP_MAX_ATTEMPTS, OtpResult, SESSION_COOKIE, bumpOtpAttempts, createOtpToken, createSessionToken, generateOtpCode, +2 | 5 |
 | [lib/claudePrompt.ts](../lib/claudePrompt.ts) | 103 | ClaudePromptInput, buildClaudeStrategyPrompt | 1 |
-| [lib/companyBoards.ts](../lib/companyBoards.ts) | 213 | BoardListing, COMPANY_BOARDS, CompanyBoard, matchesRole, searchCompanyBoards | 1 |
-| [lib/gemini.ts](../lib/gemini.ts) | 335 | Tier, geminiJson, geminiStream, geminiText | 1 |
+| [lib/companyBoards.ts](../lib/companyBoards.ts) | 384 | BoardListing, COMPANY_BOARDS, CompanyBoard, matchesRole, searchCompanyBoards | 1 |
+| [lib/gemini.ts](../lib/gemini.ts) | 346 | Tier, geminiJson, geminiStream, geminiText | 1 |
+| [lib/jobFilters.ts](../lib/jobFilters.ts) | 177 | BLOCKED_JOB_HOSTS, INDIA_RE, countryCode, dedupeJobs, fingerprint, isBlockedListing, matchesLocation, sourceRank | 6 |
 | [lib/kv.ts](../lib/kv.ts) | 158 | clearAll, deleteField, expire, getString, hgetallRaw, hincrbyFloat, incrWithExpiry, kvConfigured, +3 | 3 |
+| [lib/openTabs.ts](../lib/openTabs.ts) | 48 | OpenResult, TAB_BATCH, blockedHint, openTabs | 2 |
 | [lib/pdf/resumeDoc.tsx](../lib/pdf/resumeDoc.tsx) | 261 | ResumeTemplate, buildLetterPdf, buildResumePdf, downloadBlob, parseResume | 5 |
-| [lib/pool.ts](../lib/pool.ts) | 68 | AI_CONCURRENCY, PoolOutcome, mapPool | 3 |
-| [lib/prompts.ts](../lib/prompts.ts) | 764 | SYSTEM_BASE, TaskDef, TaskTier, systemBase, tasks | 1 |
+| [lib/pool.ts](../lib/pool.ts) | 68 | AI_CONCURRENCY, PoolOutcome, mapPool | 4 |
+| [lib/prompts.ts](../lib/prompts.ts) | 773 | SYSTEM_BASE, TaskDef, TaskTier, systemBase, tasks | 1 |
 | [lib/quota.ts](../lib/quota.ts) | 78 | QuotaInfo, quota | 4 |
 | [lib/rateLimit.ts](../lib/rateLimit.ts) | 39 | RateLimitResult, rateLimit | 3 |
+| [lib/roleSuggestions.ts](../lib/roleSuggestions.ts) | 88 | roleSuggestions, searchVariants | 1 |
 | [lib/stableJson.ts](../lib/stableJson.ts) | 22 | stableStringify | 2 |
-| [lib/store.ts](../lib/store.ts) | 425 | defaultProfile, defaultStats, defaultStrategy, store, sync | 16 |
-| [lib/types.ts](../lib/types.ts) | 295 | AutoTailorPlan, ImprovementBrief, InboxMessage, Job, MailCategory, OUTCOME_STAGES, OutcomeStage, OutreachDraft, +19 | 15 |
+| [lib/store.ts](../lib/store.ts) | 522 | defaultProfile, defaultStats, defaultStrategy, store, sync | 16 |
+| [lib/types.ts](../lib/types.ts) | 315 | AutoTailorPlan, DismissedJob, ImprovementBrief, InboxMessage, Job, MailCategory, OUTCOME_STAGES, OutcomeStage, +20 | 16 |
 | [middleware.ts](../middleware.ts) | 36 | config, middleware | 0 |
 | [next.config.mjs](../next.config.mjs) | 15 | — | 0 |
 | [postcss.config.mjs](../postcss.config.mjs) | 10 | — | 0 |

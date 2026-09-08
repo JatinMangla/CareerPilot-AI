@@ -5,6 +5,8 @@ import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
+import { isBlockedListing } from "@/lib/jobFilters";
+import { openTabs, blockedHint, TAB_BATCH } from "@/lib/openTabs";
 import { OUTCOME_STAGES, type Job, type OutcomeStage, type PreparedApplication, type Profile } from "@/lib/types";
 
 const ALL_PORTALS = [
@@ -70,7 +72,7 @@ export default function AutoApplyPage() {
     const picked = jobs.filter((j) => selected[j.id] && !apps.some((a) => a.jobId === j.id));
     if (picked.length === 0) return setError("Select at least one job (not already prepared).");
 
-    const MAX_PER_RUN = 10;
+    const MAX_PER_RUN = 25;
     let targets = picked;
     if (picked.length > MAX_PER_RUN) {
       const ok = window.confirm(
@@ -163,13 +165,50 @@ export default function AutoApplyPage() {
     setApps(next);
   }
 
-  function removeApp(jobId: string) {
+  /**
+   * `hideJob` is the fix for "I removed it and it came back".
+   *
+   * Removing only the prepared kit left the job in the match list, so the
+   * "Queue jobs" list below offered it again immediately — and because job ids
+   * are minted per search, a job-level removal keyed by id stopped matching as
+   * soon as the next search ran. Dismissals are stored by company + title.
+   */
+  function removeApp(jobId: string, hideJob: boolean) {
+    const app = apps.find((a) => a.jobId === jobId);
+    if (hideJob) {
+      const job = jobs.find((j) => j.id === jobId);
+      const target = job || (app && { title: app.jobTitle, company: app.company });
+      if (target) setJobs(store.dismissJob(target));
+    }
     const next = apps.filter((a) => a.jobId !== jobId);
     store.setApps(next);
     setApps(next);
   }
 
-  const unprepared = jobs.filter((j) => !apps.some((a) => a.jobId === j.id));
+  function dismissJob(job: Job) {
+    setJobs(store.dismissJob(job));
+  }
+
+  /** Open the applications you haven't submitted yet, one tab each. */
+  function openPending() {
+    const pending = apps.filter(
+      (a) => a.status !== "applied" && a.url && !isBlockedListing(a.url, a.company)
+    );
+    if (!pending.length) return setError("Nothing left to open — everything is marked applied.");
+    const batch = pending.slice(0, TAB_BATCH);
+    const result = openTabs(batch.map((a) => a.url));
+    setError(blockedHint(result));
+  }
+
+  const unprepared = jobs
+    .filter((j) => !apps.some((a) => a.jobId === j.id) && !isBlockedListing(j.url, j.company))
+    .sort((a, b) => b.matchScore - a.matchScore);
+  const selectedCount = unprepared.filter((j) => selected[j.id]).length;
+
+  /** Tick the n best matches at once — this list can be a hundred jobs long. */
+  function selectTop(n: number) {
+    setSelected(Object.fromEntries(unprepared.slice(0, n).map((j) => [j.id, true])));
+  }
 
   return (
     <div className="space-y-6">
@@ -224,11 +263,35 @@ export default function AutoApplyPage() {
       {/* Select jobs to prepare */}
       <div className="card-pad space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <h2 className="h2">Queue jobs</h2>
+          <h2 className="h2">
+            Queue jobs
+            <span className="text-ink-400 font-normal text-sm ml-2">
+              ({selectedCount} of {unprepared.length} selected)
+            </span>
+          </h2>
           <button className="btn-primary" onClick={prepareSelected} disabled={busy}>
-            {busy ? "Preparing…" : "➤ Prepare selected applications"}
+            {busy ? "Preparing…" : `➤ Prepare ${selectedCount || "selected"} application(s)`}
           </button>
         </div>
+        {unprepared.length > 0 && (
+          <div className="flex flex-wrap gap-2 text-xs">
+            <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => selectTop(10)}>
+              Top 10 matches
+            </button>
+            <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => selectTop(25)}>
+              Top 25
+            </button>
+            <button
+              className="btn-secondary text-xs px-3 py-1.5"
+              onClick={() => selectTop(unprepared.length)}
+            >
+              Select all
+            </button>
+            <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => setSelected({})}>
+              Clear
+            </button>
+          </div>
+        )}
         {progress && <p className="text-sm text-neon-400 animate-pulse">{progress}</p>}
         {unprepared.length === 0 && (
           <p className="text-sm text-ink-400">
@@ -251,7 +314,19 @@ export default function AutoApplyPage() {
             />
             <span className="text-sm text-ink-100">{job.title}</span>
             <span className="text-xs text-ink-400">@ {job.company}</span>
-            <span className="ml-auto badge-green">{job.matchScore}%</span>
+            <span className="ml-auto flex items-center gap-2">
+              <span className="badge-green">{job.matchScore}%</span>
+              <button
+                className="text-[11px] text-coral-400 hover:underline"
+                title="Hide this job for good"
+                onClick={(e) => {
+                  e.preventDefault();
+                  dismissJob(job);
+                }}
+              >
+                ✕
+              </button>
+            </span>
           </label>
         ))}
       </div>
@@ -259,10 +334,15 @@ export default function AutoApplyPage() {
       {/* Prepared applications */}
       {apps.length > 0 && (
         <div className="space-y-4">
-          <h2 className="h2">
-            Prepared applications ({apps.filter((a) => a.status === "applied").length}{" "}
-            applied / {apps.length})
-          </h2>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="h2">
+              Prepared applications ({apps.filter((a) => a.status === "applied").length}{" "}
+              applied / {apps.length})
+            </h2>
+            <button className="btn-secondary text-xs" onClick={openPending}>
+              ↗ Open next {TAB_BATCH} in tabs
+            </button>
+          </div>
           {apps
             .slice()
             .reverse()
@@ -274,7 +354,7 @@ export default function AutoApplyPage() {
                 job={jobs.find((j) => j.id === app.jobId)}
                 onApplied={() => markApplied(app.jobId)}
                 onOutcome={(o) => setOutcome(app.jobId, o)}
-                onRemove={() => removeApp(app.jobId)}
+                onRemove={(hideJob) => removeApp(app.jobId, hideJob)}
               />
             ))}
         </div>
@@ -296,7 +376,7 @@ function AppCard({
   job?: Job;
   onApplied: () => void;
   onOutcome: (o: OutcomeStage) => void;
-  onRemove: () => void;
+  onRemove: (hideJob: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState("");
@@ -346,8 +426,15 @@ function AppCard({
             Mark as applied
           </button>
         )}
-        <button className="btn-danger text-xs px-3 py-1.5" onClick={onRemove}>
-          Remove
+        <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => onRemove(false)}>
+          Discard kit
+        </button>
+        <button
+          className="btn-danger text-xs px-3 py-1.5"
+          title="Removes the kit and hides this job for good"
+          onClick={() => onRemove(true)}
+        >
+          Not interested
         </button>
       </div>
 

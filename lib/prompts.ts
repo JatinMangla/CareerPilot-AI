@@ -244,8 +244,8 @@ Be honest in cons — e.g. "requires 3+ yrs, you may be screened out". These are
     // Listings and resume are both in the key, so this only hits when the user
     // reloads the same search — which is exactly when it should.
     cacheTtl: 21600,
-    build: ({ jobs, resume }) => ({
-      system: SYSTEM_BASE,
+    build: ({ jobs, resume, profile }) => ({
+      system: systemBase(profile),
       user: `Here are real job listings fetched from a job API, plus my resume. Analyze each for me.
 
 <listings>
@@ -256,7 +256,16 @@ ${JSON.stringify(jobs, null, 2)}
 ${resume}
 </resume>
 
-Return the same jobs enriched: keep id/title/company/location/url/description/source from the listing exactly as given (salary: use listing salary or estimate a realistic range), and add matchScore, pros, cons (honest), jobSecurity, futureOutlook, recommendation.`,
+Return the same jobs enriched: keep id/title/company/location/url/description/source from the listing exactly as given (salary: use listing salary or estimate a realistic range), and add matchScore, pros, cons (honest), jobSecurity, futureOutlook, recommendation.
+
+matchScore decides what I spend my week on, so make it discriminating — a list where everything scores 70-85 is useless to me. Anchor it:
+- 85-100: I meet the core stack AND the experience bar. Apply today.
+- 70-84: strong on stack, short on years or one named technology. Worth applying; a referral makes the difference.
+- 50-69: plausible stretch — the gap is real and I should expect an ATS screen-out without a referral.
+- Below 50: wrong stack, wrong seniority, or wrong location. Say so plainly.
+Spread the scores across that range rather than clustering, and never round everything to a multiple of 5.
+
+Each "cons" entry must name the specific thing that would get me screened out of THIS listing ("asks for 4+ years, resume shows 2"), not a generic caution. "recommendation" is one line and starts with one of: "Apply now", "Apply with a referral", or "Skip" — followed by the reason.`,
     }),
     schema: obj({ jobs: { type: "array", items: jobSchema } }),
   },

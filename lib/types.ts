@@ -91,6 +91,24 @@ export interface Job {
   futureOutlook: string; // good for career future or not
   recommendation: string; // apply / skip advice
   description?: string;
+  /** When this listing was first added to the local list. */
+  foundAt?: number;
+  /** Which source filter produced it — "boards" | "yc" | "portals" | "ai". */
+  via?: string;
+}
+
+/**
+ * A job the user removed.
+ *
+ * Stored by fingerprint (company + normalized title), never by id: every search
+ * mints new ids, so an id-keyed list stopped matching and the removed job came
+ * straight back on the next search.
+ */
+export interface DismissedJob {
+  fp: string;
+  title: string;
+  company: string;
+  at: number;
 }
 
 /* ---------- Referrals (the highest-converting channel) ---------- */
@@ -188,6 +206,8 @@ export type QueueStatus =
   | "needs_approval"
   | "approved"
   | "exported"
+  /** Opened in a browser tab for you to submit yourself. */
+  | "opened"
   | "submitted"
   | "failed";
 

@@ -1,20 +1,27 @@
 #!/usr/bin/env node
 /**
- * CareerPilot Auto-Apply Agent
- * ----------------------------
- * Submits your prepared applications on OFFICIAL company career sites
- * (Greenhouse, Lever, Ashby, Workable and similar ATS forms).
+ * CareerPilot Apply Assistant
+ * ---------------------------
+ * Opens your prepared applications on OFFICIAL company career sites
+ * (Greenhouse, Lever, Ashby, Workable and similar ATS forms) and fills in
+ * everything it can, so all that is left for you is to read it and press
+ * Submit.
  *
- * Runs locally, in a visible browser, on your machine — you can watch every
- * keystroke and take over at any point.
+ *   npm run apply                 # opens each application and fills it in
+ *   npm run apply -- --open       # just opens every one in its own tab
+ *   npm run apply -- --only=Stripe
+ *   npm run apply -- --headless   # fill + screenshot without a visible browser
  *
- *   npm run apply                 # dry run: fills + screenshots, submits nothing
- *   npm run apply -- --submit     # actually submits (only where safe)
- *   npm run apply -- --only=Infosys
- *   npm run apply -- --headless
+ * IT NEVER SUBMITS ANYTHING. That is deliberate, and it is not a limitation:
  *
- * Never touches LinkedIn / Naukri / Indeed — their terms forbid automated
- * submission and accounts get banned for it.
+ *  - A submitted application cannot be taken back. A mis-parsed dropdown or a
+ *    question the agent answered from a guess is then permanent, and you find
+ *    out from the rejection.
+ *  - Every application still gets a human read, which is the thing that
+ *    actually separates a considered application from a mass-send.
+ *
+ * Also never touches LinkedIn / Naukri / Indeed — automating those violates
+ * their terms and gets accounts banned.
  */
 
 import { chromium } from "playwright";
@@ -29,7 +36,6 @@ const QUEUE_FILE = path.join(HERE, "apply-queue.json");
 const RESULTS_FILE = path.join(HERE, "results.json");
 const SHOTS_DIR = path.join(HERE, "screenshots");
 
-const AUTO_SUBMIT_ATS = new Set(["greenhouse", "lever", "ashby", "workable"]);
 const BLOCKED_HOSTS = [
   "linkedin.",
   "naukri.",
@@ -45,8 +51,9 @@ const BLOCKED_HOSTS = [
 ];
 
 const args = process.argv.slice(2);
-const DO_SUBMIT = args.includes("--submit");
-const HEADLESS = args.includes("--headless");
+/** Open every application in its own tab and stop — no form filling at all. */
+const OPEN_ONLY = args.includes("--open");
+const HEADLESS = args.includes("--headless") && !OPEN_ONLY;
 const ONLY = (args.find((a) => a.startsWith("--only=")) || "").split("=")[1];
 
 const c = {
@@ -321,6 +328,11 @@ async function fillForm(page, app, profile, resumePath, report) {
   }
 }
 
+/**
+ * Finds the submit button — to scroll it into view, never to click it.
+ * The page is handed over with the button on screen so the last step is one
+ * deliberate click by you.
+ */
 async function findSubmitButton(page) {
   const sels = [
     'button:has-text("Submit application")',
@@ -335,17 +347,6 @@ async function findSubmitButton(page) {
     if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) return el;
   }
   return null;
-}
-
-async function looksSubmitted(page) {
-  return page
-    .evaluate(() => {
-      const t = (document.body.innerText || "").toLowerCase();
-      return /thank you|application (has been )?(received|submitted)|we('| ha)ve received|successfully (applied|submitted)|thanks for applying/.test(
-        t
-      );
-    })
-    .catch(() => false);
 }
 
 /* ------------------------------------------------------------------ */
@@ -378,13 +379,16 @@ async function main() {
   fs.mkdirSync(SHOTS_DIR, { recursive: true });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "careerpilot-"));
 
-  log(c.bold(`\n🚀 CareerPilot Auto-Apply Agent`));
+  log(c.bold(`\n🚀 CareerPilot Apply Assistant`));
   log(`   Applications: ${c.cyan(apps.length)}`);
   log(
     `   Mode: ${
-      DO_SUBMIT ? c.green("LIVE — will submit where safe") : c.amber("DRY RUN — fills only, submits nothing")
+      OPEN_ONLY
+        ? c.cyan("OPEN — every job in its own tab, nothing filled")
+        : c.cyan("FILL — fills each form for you to check")
     }`
   );
+  log(c.green(`   Submitting: never. You press Submit in the browser.`));
   log(c.dim(`   Screenshots → ${SHOTS_DIR}\n`));
 
   const browser = await chromium.launch({ headless: HEADLESS, slowMo: HEADLESS ? 0 : 60 });
@@ -394,6 +398,37 @@ async function main() {
   });
 
   const results = [];
+
+  /*
+   * --open: one tab per application, left open, in order. No form filling, so
+   * nothing to review and nothing that can be got wrong — this is the "just
+   * show me all of them and I'll do it" path.
+   */
+  if (OPEN_ONLY) {
+    for (const app of apps) {
+      const page = await context.newPage();
+      await page.goto(app.url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch((err) => {
+        log(c.red(`      ✖ ${app.company}: ${err.message}`));
+      });
+      log(`  ${c.green("↗")} ${app.title} @ ${app.company}`);
+      results.push({
+        jobId: app.jobId,
+        company: app.company,
+        title: app.title,
+        url: app.url,
+        status: "opened",
+      });
+    }
+    fs.writeFileSync(RESULTS_FILE, JSON.stringify(results, null, 2));
+    log(
+      c.bold(`\n  ${apps.length} tab(s) open. Your cover letter and answers are in `) +
+        c.cyan("apply-queue.json") +
+        c.bold(` and in the app.\n`)
+    );
+    log(c.dim("  Browser stays open. Press Ctrl+C when you're done.\n"));
+    await new Promise(() => {});
+    return;
+  }
 
   for (let i = 0; i < apps.length; i++) {
     const app = apps[i];
@@ -452,55 +487,26 @@ async function main() {
       await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
       report.screenshot = shot;
 
-      const canAutoSubmit =
-        DO_SUBMIT &&
-        AUTO_SUBMIT_ATS.has(app.ats) &&
-        app.autoSubmit !== false &&
-        !captcha &&
-        report.needsYou.length === 0 &&
-        report.filled.length >= 3;
+      // Filled and left alone. The submit button is deliberately never clicked:
+      // see the note at the top of this file. Scroll it into view so the tab is
+      // handed over at the exact point you need to act on.
+      const submitBtn = await findSubmitButton(page);
+      if (submitBtn) await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
 
-      if (canAutoSubmit) {
-        const btn = await findSubmitButton(page);
-        if (!btn) {
-          report.status = "filled_no_submit_button";
-          log(c.amber(`      ⚠ Filled, but no submit button found — finish in the browser`));
-        } else {
-          await btn.click({ timeout: 10000 });
-          await page.waitForTimeout(5000);
-          const ok = await looksSubmitted(page);
-          report.status = ok ? "submitted" : "submit_clicked_unconfirmed";
-          log(
-            ok
-              ? c.green(`      ✅ SUBMITTED — confirmation detected`)
-              : c.amber(`      ⚠ Submit clicked but no confirmation text — verify manually`)
-          );
-          await page
-            .screenshot({ path: shot.replace(/\.png$/, "_after.png"), fullPage: true })
-            .catch(() => {});
-        }
-      } else if (DO_SUBMIT) {
-        report.status = "needs_review";
-        const why = captcha
-          ? "CAPTCHA"
-          : report.needsYou.length
-          ? `${report.needsYou.length} field(s) need you`
-          : !AUTO_SUBMIT_ATS.has(app.ats)
-          ? `${app.ats} not auto-submittable`
-          : "not enough fields filled";
-        report.note = why;
-        log(c.amber(`      ⏸  Filled but not submitted — ${why}`));
+      report.status = report.needsYou.length ? "needs_you" : "filled";
+      if (report.needsYou.length) {
+        log(
+          c.amber(
+            `      ✓ ${report.filled.length} fields filled — ${report.needsYou.length} need you`
+          )
+        );
       } else {
-        report.status = "dry_run_filled";
-        log(c.cyan(`      ✓ Dry run complete — ${report.filled.length} fields filled`));
+        log(c.cyan(`      ✓ ${report.filled.length} fields filled — review and submit`));
       }
 
-      // In headed mode leave the tab open so you can inspect / finish it.
-      if (!HEADLESS && report.status !== "submitted") {
-        log(c.dim(`      (tab left open for you)`));
-      } else {
-        await page.close();
-      }
+      // In headed mode leave the tab open so you can check and submit it.
+      if (!HEADLESS) log(c.dim(`      (tab left open for you)`));
+      else await page.close();
     } catch (err) {
       report.status = "error";
       report.note = err.message;
@@ -516,22 +522,17 @@ async function main() {
   /* ---- summary ---- */
   const n = (s) => results.filter((r) => r.status === s).length;
   log(c.bold(`\n────────── Summary ──────────`));
-  log(`  ${c.green("submitted")}          ${n("submitted")}`);
-  log(`  ${c.amber("needs review")}       ${n("needs_review") + n("filled_no_submit_button") + n("submit_clicked_unconfirmed")}`);
-  log(`  ${c.cyan("dry-run filled")}     ${n("dry_run_filled")}`);
+  log(`  ${c.green("filled, ready")}      ${n("filled")}`);
+  log(`  ${c.amber("need an answer")}     ${n("needs_you")}`);
   log(`  ${c.dim("skipped (portal)")}   ${n("skipped_portal")}`);
   log(`  ${c.red("errors")}             ${n("error")}`);
   log(`\n  Details → ${c.cyan(path.basename(RESULTS_FILE))}`);
   log(`  Screenshots → ${c.cyan(path.relative(process.cwd(), SHOTS_DIR))}`);
-  if (!DO_SUBMIT) {
-    log(
-      c.amber(
-        `\n  This was a dry run. Review the screenshots, then run:\n    npm run apply -- --submit\n`
-      )
-    );
-  } else {
-    log("");
-  }
+  log(
+    c.green(
+      `\n  Nothing was submitted. Go through the open tabs, check each form, and press Submit.\n`
+    )
+  );
 
   if (!HEADLESS) {
     log(c.dim("  Browser stays open. Press Ctrl+C when you're done.\n"));

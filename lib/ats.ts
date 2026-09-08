@@ -1,13 +1,20 @@
 /**
  * ATS (Applicant Tracking System) detection + automation policy.
  *
- * Official company career pages run on a handful of ATS platforms whose
- * application forms are standard and safe to automate — you're filling your own
- * application on the employer's own site.
+ * Nothing in this app submits an application any more — the last step is always
+ * a human clicking Submit in a tab that has been opened and filled for them.
+ * The two flags below survived that change because they still describe real
+ * differences between forms:
  *
- * Social job portals (LinkedIn, Naukri, Indeed…) explicitly forbid automated
- * submission in their terms and ban accounts that do it, so they are never
- * auto-submitted — we hand you a prepared kit + direct link instead.
+ *   autoFill    — the assistant can recognize and fill this form's fields.
+ *   autoSubmit  — the form is a single standard page that will be COMPLETELY
+ *                 filled, so the tab you're handed needs a read and one click.
+ *                 A false here (Workday's wizard, a portal) means there is real
+ *                 work left for you on the page.
+ *
+ * Social job portals (LinkedIn, Naukri, Indeed…) forbid automated interaction
+ * in their terms and ban accounts for it, so the agent never opens or touches
+ * them at all — we hand you a prepared kit + direct link instead.
  */
 
 export type AtsKind =
@@ -26,7 +33,7 @@ export type AtsKind =
 export interface AtsInfo {
   kind: AtsKind;
   label: string;
-  /** Can the local agent fill AND submit this automatically? */
+  /** Standard single-page form the assistant can fill completely. */
   autoSubmit: boolean;
   /** Can the agent at least auto-fill it for you to review? */
   autoFill: boolean;
@@ -54,8 +61,9 @@ const PORTALS = [
  *
  * `find_jobs` asks the model to invent "currently-plausible" openings, including
  * their URLs — which is fine as a research lead, but those URLs must never reach
- * the submit agent. A fabricated greenhouse.io link looks auto-submittable to
- * detectAts and would have an application sent to it.
+ * the apply pipeline. A fabricated greenhouse.io link is indistinguishable from a
+ * real one to detectAts, and would have you tailoring a resume for a job that
+ * does not exist.
  */
 const VERIFIED_SOURCES = new Set([
   "company-boards",
@@ -77,7 +85,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       label: "Job portal",
       autoSubmit: false,
       autoFill: false,
-      note: "Portal terms forbid automated submission (account-ban risk). Use the prepared kit and submit manually — it takes ~60 seconds.",
+      note: "Portal terms forbid automation (account-ban risk). Use the prepared kit and apply by hand — it takes ~60 seconds.",
     };
   }
 
@@ -87,7 +95,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       label: "Greenhouse",
       autoSubmit: true,
       autoFill: true,
-      note: "Standard form — fully automatable.",
+      note: "Standard single-page form — filled completely; read it and press Submit.",
     };
 
   if (url.includes("lever.co"))
@@ -96,7 +104,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       label: "Lever",
       autoSubmit: true,
       autoFill: true,
-      note: "Standard form — fully automatable.",
+      note: "Standard single-page form — filled completely; read it and press Submit.",
     };
 
   if (url.includes("workatastartup.com"))
@@ -114,7 +122,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       label: "Y Combinator",
       autoSubmit: false,
       autoFill: true,
-      note: "YC listings usually hand off to the company's own ATS (Ashby/Greenhouse/Lever) — open it and the real application URL is auto-submittable.",
+      note: "YC listings usually hand off to the company's own ATS (Ashby/Greenhouse/Lever) — open it and the real application URL is a standard ATS form.",
     };
 
   if (url.includes("ashbyhq.com"))
@@ -123,7 +131,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       label: "Ashby",
       autoSubmit: true,
       autoFill: true,
-      note: "Standard form — fully automatable.",
+      note: "Standard single-page form — filled completely; read it and press Submit.",
     };
 
   if (url.includes("workable.com") || url.includes("apply.workable"))
@@ -132,7 +140,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       label: "Workable",
       autoSubmit: true,
       autoFill: true,
-      note: "Standard form — fully automatable.",
+      note: "Standard single-page form — filled completely; read it and press Submit.",
     };
 
   if (url.includes("smartrecruiters.com"))

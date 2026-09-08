@@ -6,6 +6,8 @@ import { store } from "@/lib/store";
 import { jsonTask, streamTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { detectAts, isVerifiedSource } from "@/lib/ats";
+import { openTabs, blockedHint, TAB_BATCH } from "@/lib/openTabs";
+import { isBlockedListing } from "@/lib/jobFilters";
 import type { AutoTailorPlan, Job, QueuedApplication } from "@/lib/types";
 
 export default function AutoPilotPage() {
@@ -37,21 +39,23 @@ export default function AutoPilotPage() {
     if (!picked.length) return setError("Select at least one job that isn't queued yet.");
 
     // AI-researched leads are plausible-looking guesses — the company, the role
-    // and the URL may not exist. They're fine to read; they must not be queued
-    // for automated submission.
+    // and the URL may not exist. They're fine to read as leads; they must not
+    // reach the apply queue, where they'd cost a deep tailoring pass each and
+    // send you to a page that isn't there.
     const unverified = picked.filter((j) => !isVerifiedSource(j.source));
     if (unverified.length) {
       return setError(
         `${unverified.length} of these are AI-researched leads, not verified listings ` +
           `(${unverified.slice(0, 3).map((j) => j.company).join(", ")}${unverified.length > 3 ? "…" : ""}). ` +
-          `Their URLs may not exist, so Auto-Pilot won't submit to them. ` +
-          `Use the "Company boards" or "Y Combinator" source on the Job Matches page for auto-applyable roles.`
+          `Their URLs may not exist, so Auto-Pilot won't prepare them. ` +
+          `Use the "Company boards" or "Y Combinator" source on the Job Matches page for real, applyable roles.`
       );
     }
 
-    // Each job is one deep-tier AI call. Cap the run so a stray click can't
-    // burn the day's free quota in one go.
-    const MAX_PER_RUN = 10;
+    // Each job is one deep-tier AI call. The cap exists so a stray click can't
+    // burn the day's free quota in one go — not to limit how much you apply
+    // for, which is why it asks rather than silently truncating.
+    const MAX_PER_RUN = 25;
     let targets = picked;
     if (picked.length > MAX_PER_RUN) {
       const ok = window.confirm(
@@ -154,7 +158,16 @@ export default function AutoPilotPage() {
     }
   }
 
-  function removeItem(jobId: string) {
+  function removeItem(jobId: string, alsoHideJob: boolean) {
+    // Removing a queued application used to leave the job sitting in the match
+    // list, so the very next visit offered it again — which is what made it
+    // look like removals did nothing.
+    if (alsoHideJob) {
+      const job = jobs.find((j) => j.id === jobId);
+      const q = queue.find((x) => x.jobId === jobId);
+      const target = job || (q && { title: q.title, company: q.company });
+      if (target) setJobs(store.dismissJob(target));
+    }
     saveQueue(queue.filter((q) => q.jobId !== jobId));
   }
 
@@ -162,6 +175,44 @@ export default function AutoPilotPage() {
     saveQueue(
       queue.map((q) => (q.jobId === jobId ? { ...q, status: "submitted" as const } : q))
     );
+  }
+
+  /**
+   * Step 4 — open every ready application in its own tab.
+   *
+   * This replaced automated submission. The agent used to click Submit for you
+   * on Greenhouse/Lever/Ashby; now nothing is ever sent without you seeing it.
+   * Everything up to the final button is still done for you — tailored resume,
+   * cover letter, screening answers — so each tab is a review and one click.
+   */
+  function openReady() {
+    const ready = queue.filter(
+      (q) =>
+        (q.status === "approved" || q.status === "exported") &&
+        q.url &&
+        !isBlockedListing(q.url, q.company)
+    );
+    if (!ready.length) return setError("Nothing approved to open yet.");
+
+    const batch = ready.slice(0, TAB_BATCH);
+    const result = openTabs(batch.map((q) => q.url));
+    const hint = blockedHint(result);
+    setError(hint);
+
+    if (result.opened) {
+      const ids = new Set(batch.slice(0, result.opened).map((q) => q.jobId));
+      saveQueue(
+        queue.map((q) => (ids.has(q.jobId) ? { ...q, status: "opened" as const } : q))
+      );
+    }
+    if (!hint) {
+      const left = ready.length - batch.length;
+      setProgress(
+        `Opened ${result.opened} application${result.opened === 1 ? "" : "s"} in new tabs — ` +
+          `your kit for each is below. ${left > 0 ? `${left} still queued: click again for the next batch.` : ""}`
+      );
+      setTimeout(() => setProgress(""), 8000);
+    }
   }
 
   /** Step 3 — export the approved queue (with PDFs) for the local agent. */
@@ -231,13 +282,36 @@ export default function AutoPilotPage() {
     }
   }
 
-  const unqueued = jobs.filter((j) => !queue.some((q) => q.jobId === j.id));
+  const unqueued = jobs
+    .filter((j) => !queue.some((q) => q.jobId === j.id) && !isBlockedListing(j.url, j.company))
+    .sort((a, b) => b.matchScore - a.matchScore);
   const counts = {
     needs: queue.filter((q) => q.status === "needs_approval").length,
     approved: queue.filter((q) => q.status === "approved").length,
     exported: queue.filter((q) => q.status === "exported").length,
+    opened: queue.filter((q) => q.status === "opened").length,
     submitted: queue.filter((q) => q.status === "submitted").length,
   };
+  const readyToOpen = queue.filter(
+    (q) => q.status === "approved" || q.status === "exported"
+  ).length;
+  const selectedCount = unqueued.filter((j) => selected[j.id]).length;
+
+  /**
+   * Selects the n best-matching jobs that Auto-Pilot can actually prepare.
+   *
+   * AI-researched leads are skipped: they fail the verified-source gate in
+   * `prepareSelected`, so including them would only produce an error telling
+   * you to deselect them again.
+   */
+  function selectTop(n: number) {
+    const picks = unqueued
+      .filter((j) => isVerifiedSource(j.source))
+      .slice()
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, n);
+    setSelected(Object.fromEntries(picks.map((j) => [j.id, true])));
+  }
 
   return (
     <div className="space-y-6">
@@ -245,8 +319,8 @@ export default function AutoPilotPage() {
         <h1 className="h1">Auto-Pilot</h1>
         <p className="muted mt-1">
           AI tailors your resume per job, asks you only when it would need to claim
-          something new, then a local agent fills and submits the application directly on
-          the company&apos;s official career site.
+          something new, exports a ready-to-paste kit, then opens every application in
+          its own tab — you press Submit.
         </p>
       </div>
 
@@ -256,7 +330,7 @@ export default function AutoPilotPage() {
           { n: "1", t: "Tailor", d: "AI rewrites your resume for each job using only real experience." },
           { n: "2", t: "Approve", d: "If it needs a claim you haven't made, it asks you first." },
           { n: "3", t: "Export", d: "Download the queue — tailored PDFs and answers included." },
-          { n: "4", t: "Auto-submit", d: "Local agent applies on Greenhouse / Lever / Ashby / Workable." },
+          { n: "4", t: "Open & apply", d: "Every application opens in its own tab. Nothing is ever submitted for you." },
         ].map((s) => (
           <div key={s.n} className="card p-4">
             <span className="grid place-items-center w-6 h-6 rounded-full bg-neon-500/15 text-neon-400 text-xs font-bold border border-neon-500/30">
@@ -269,15 +343,17 @@ export default function AutoPilotPage() {
       </div>
 
       <div className="text-xs text-ink-300 bg-sky2-500/10 border border-sky2-500/25 rounded-xl px-4 py-3 leading-relaxed">
-        <b className="text-sky2-400">Official career sites only.</b> Greenhouse, Lever,
-        Ashby and Workable forms are submitted automatically. LinkedIn / Naukri / Indeed
-        are never bot-submitted — their terms forbid it and accounts get banned — so those
-        stay in{" "}
+        <b className="text-sky2-400">You press Submit — always.</b> Auto-Pilot does every
+        step except the last one: it tailors the resume, writes the cover letter, answers
+        the screening questions, then opens each application in its own tab with the kit
+        beside it. Nothing is submitted on your behalf, so no application goes out that
+        you haven&apos;t seen and no account is ever at risk. Applying direct on the
+        company&apos;s own ATS still beats a portal: far fewer applicants, and it lands
+        straight in the employer&apos;s system rather than in{" "}
         <Link href="/auto-apply" className="underline">
-          Auto-Apply
-        </Link>{" "}
-        as one-click kits. Applying direct also beats portals: fewer applicants, and your
-        application lands straight in the employer&apos;s ATS.
+          a queue behind ten thousand others
+        </Link>
+        .
       </div>
 
       {error && (
@@ -294,11 +370,40 @@ export default function AutoPilotPage() {
       {/* Queue jobs */}
       <div className="card-pad space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <h2 className="h2">Pick jobs to auto-apply</h2>
+          <h2 className="h2">
+            Pick jobs to apply for
+            <span className="text-ink-400 font-normal text-sm ml-2">
+              ({selectedCount} of {unqueued.length} selected)
+            </span>
+          </h2>
           <button className="btn-primary" onClick={prepareSelected} disabled={busy}>
-            {busy ? "Working…" : "✦ Tailor & queue selected"}
+            {busy ? "Working…" : `✦ Tailor & queue ${selectedCount || "selected"}`}
           </button>
         </div>
+        {/* Ticking eighty boxes by hand is what stopped this being used at
+            volume — the whole point is applying to a lot of jobs. */}
+        {unqueued.length > 0 && (
+          <div className="flex flex-wrap gap-2 text-xs">
+            <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => selectTop(10)}>
+              Top 10 matches
+            </button>
+            <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => selectTop(25)}>
+              Top 25
+            </button>
+            <button
+              className="btn-secondary text-xs px-3 py-1.5"
+              onClick={() => selectTop(unqueued.length)}
+            >
+              Select all applyable
+            </button>
+            <button
+              className="btn-secondary text-xs px-3 py-1.5"
+              onClick={() => setSelected({})}
+            >
+              Clear
+            </button>
+          </div>
+        )}
         {unqueued.length === 0 ? (
           <p className="text-sm text-ink-400">
             No new jobs.{" "}
@@ -324,7 +429,7 @@ export default function AutoPilotPage() {
                 <span className="text-xs text-ink-400">@ {job.company}</span>
                 <span className="ml-auto flex items-center gap-2">
                   {!isVerifiedSource(job.source) ? (
-                    <span className="badge-red" title="AI-researched lead — URL may not exist, so it can't be auto-submitted">
+                    <span className="badge-red" title="AI-researched lead — the URL may not exist, so Auto-Pilot won't prepare it">
                       ⚠ unverified
                     </span>
                   ) : (
@@ -334,10 +439,20 @@ export default function AutoPilotPage() {
                       }
                       title={ats.note}
                     >
-                      {ats.autoSubmit ? "🤖 auto-submit" : ats.autoFill ? "✋ auto-fill" : "manual"}
+                      {ats.label}
                     </span>
                   )}
                   <span className="badge-blue">{job.matchScore}%</span>
+                  <button
+                    className="text-[11px] text-coral-400 hover:underline"
+                    title="Hide this job for good"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setJobs(store.dismissJob(job));
+                    }}
+                  >
+                    ✕
+                  </button>
                 </span>
               </label>
             );
@@ -351,15 +466,21 @@ export default function AutoPilotPage() {
           <div className="flex items-center justify-between flex-wrap gap-3">
             <h2 className="h2">
               Queue — {counts.needs} need you · {counts.approved} ready · {counts.exported}{" "}
-              exported · {counts.submitted} submitted
+              exported · {counts.opened} opened · {counts.submitted} submitted
             </h2>
-            <button
-              className="btn-primary"
-              onClick={exportQueue}
-              disabled={exporting || counts.approved === 0}
-            >
-              {exporting ? "Building PDFs…" : `⬇ Export ${counts.approved} for agent`}
-            </button>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                className="btn-secondary"
+                onClick={exportQueue}
+                disabled={exporting || counts.approved === 0}
+              >
+                {exporting ? "Building PDFs…" : `⬇ Export ${counts.approved} (PDFs + answers)`}
+              </button>
+              <button className="btn-primary" onClick={openReady} disabled={readyToOpen === 0}>
+                ↗ Open {Math.min(readyToOpen, TAB_BATCH)} application
+                {Math.min(readyToOpen, TAB_BATCH) === 1 ? "" : "s"} in tabs
+              </button>
+            </div>
           </div>
 
           {queue
@@ -371,17 +492,24 @@ export default function AutoPilotPage() {
                 item={item}
                 busy={busy}
                 onApprove={applyApprovals}
-                onRemove={() => removeItem(item.jobId)}
+                onRemove={(hideJob) => removeItem(item.jobId, hideJob)}
                 onSubmitted={() => markSubmitted(item.jobId)}
               />
             ))}
         </div>
       )}
 
-      {/* Agent setup */}
+      {/* Optional local agent */}
       <div className="card-pad">
-        <h2 className="h2 mb-3">Running the agent (one-time setup)</h2>
-        <ol className="text-sm text-ink-300 space-y-2 list-decimal list-inside leading-relaxed">
+        <h2 className="h2 mb-3">Optional: the local form-filler</h2>
+        <p className="text-sm text-ink-300 leading-relaxed">
+          You don&apos;t need this — <b className="text-ink-100">Open in tabs</b> above is
+          the normal route. The local agent is for when you&apos;d rather not retype the
+          same answers into twenty forms: it opens each application in a real browser on
+          your machine and fills every field it recognizes, then stops and hands you the
+          keyboard. <b className="text-ink-100">It never submits anything.</b>
+        </p>
+        <ol className="text-sm text-ink-300 space-y-2 list-decimal list-inside leading-relaxed mt-3">
           <li>
             In your project folder run:{" "}
             <code className="text-neon-400 text-xs">cd agent &amp;&amp; npm install</code>
@@ -391,12 +519,12 @@ export default function AutoPilotPage() {
             <code className="text-xs">agent/</code> folder.
           </li>
           <li>
-            Dry run (fills, screenshots, submits nothing):{" "}
-            <code className="text-neon-400 text-xs">npm run apply</code>
+            Open every application in its own tab, nothing filled:{" "}
+            <code className="text-neon-400 text-xs">npm run apply -- --open</code>
           </li>
           <li>
-            When the screenshots look right, submit for real:{" "}
-            <code className="text-neon-400 text-xs">npm run apply -- --submit</code>
+            Or open and auto-fill each one for you to check and submit:{" "}
+            <code className="text-neon-400 text-xs">npm run apply</code>
           </li>
         </ol>
         <p className="text-xs text-ink-400 mt-3 leading-relaxed">
@@ -419,7 +547,7 @@ function QueueCard({
   item: QueuedApplication;
   busy: boolean;
   onApprove: (item: QueuedApplication, ids: string[], answers: string) => void;
-  onRemove: () => void;
+  onRemove: (hideJob: boolean) => void;
   onSubmitted: () => void;
 }) {
   const [open, setOpen] = useState(item.status === "needs_approval");
@@ -438,8 +566,9 @@ function QueueCard({
   const label = {
     planning: "Planning",
     needs_approval: "⚠ Needs your approval",
-    approved: "✓ Ready to submit",
-    exported: "Exported to agent",
+    approved: "✓ Ready — open and submit",
+    exported: "Exported (PDF + answers)",
+    opened: "↗ Opened in a tab",
     submitted: "✓ Submitted",
     failed: "Failed",
   }[item.status];
@@ -455,7 +584,11 @@ function QueueCard({
         </div>
         <div className="flex items-center gap-2">
           <span className={tone}>{label}</span>
-          {item.autoSubmit && <span className="badge-green">🤖 auto-submit</span>}
+          {item.autoSubmit && (
+            <span className="badge-green" title="Standard single-page form — filled completely, so it is a read and one click">
+              one-click form
+            </span>
+          )}
         </div>
       </div>
 
@@ -474,13 +607,18 @@ function QueueCard({
         >
           Open listing ↗
         </a>
-        {(item.status === "exported" || item.status === "approved") && (
+        {item.status !== "submitted" && item.status !== "failed" && (
           <button className="text-xs text-neon-400 hover:underline" onClick={onSubmitted}>
             Mark submitted
           </button>
         )}
-        <button className="text-xs text-coral-400 hover:underline" onClick={onRemove}>
-          Remove
+        <button className="text-xs text-ink-400 hover:text-ink-200" onClick={() => onRemove(false)}>
+          Discard kit
+        </button>
+        {/* "Not interested" also hides the job itself, so the match list stops
+            offering it back on every visit. */}
+        <button className="text-xs text-coral-400 hover:underline" onClick={() => onRemove(true)}>
+          Not interested
         </button>
       </div>
 

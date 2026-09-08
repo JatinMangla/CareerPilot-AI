@@ -1,10 +1,15 @@
-# CareerPilot Auto-Apply Agent
+# CareerPilot Apply Assistant
 
-Submits your prepared applications **directly on companies' official career sites** —
-Greenhouse, Lever, Ashby, Workable and most bespoke ATS forms.
+Opens your prepared applications **directly on companies' official career sites** —
+Greenhouse, Lever, Ashby, Workable and most bespoke ATS forms — and fills in everything
+it can, so all that's left is to read the form and press Submit.
 
 Runs on your machine, in a visible browser, so you can watch every step and take over
 whenever you want.
+
+**It never submits anything.** That is on purpose. A sent application can't be recalled,
+so a mis-parsed dropdown or a guessed answer becomes permanent and you find out from the
+rejection. Everything up to the final click is automated; the click is yours.
 
 ## Setup (once)
 
@@ -16,62 +21,65 @@ npm install          # also downloads Chromium (~120 MB)
 ## Each run
 
 1. On the **Auto-Pilot** page in CareerPilot, tailor + approve jobs, then click
-   **Export for agent**.
+   **Export** (PDFs + answers).
 2. Move the downloaded `apply-queue.json` into this `agent/` folder.
-3. Dry run first — fills every form, screenshots it, submits **nothing**:
+3. Either open every application and fill it in for you to check:
 
    ```bash
    npm run apply
    ```
 
-4. Check `screenshots/`. If the forms look right, go live:
+   …or just open them all in tabs and do the typing yourself:
 
    ```bash
-   npm run apply -- --submit
+   npm run apply -- --open
    ```
+
+4. Go through the open tabs, check each form against the cover letter and answers from
+   the app, and press Submit.
+
+> If you'd rather not install anything, the **Open in tabs** button on the Auto-Pilot
+> page does step 3 straight from your browser.
 
 ## Verify your setup safely
 
 `test-fixture.html` is a fake application form bundled here. Point a queue at it
-(`"url": "file:///…/agent/test-fixture.html"`) and run with `--submit` to confirm the
-agent fills and submits correctly, without touching any real employer.
+(`"url": "file:///…/agent/test-fixture.html"`) to see exactly what the agent fills in,
+without touching any real employer.
 
 ## Flags
 
 | Flag | Effect |
 | --- | --- |
-| *(none)* | Dry run — fill + screenshot only |
-| `--submit` | Actually submit, where safe |
-| `--only=Infosys` | Just one company/title (substring match) |
-| `--headless` | No visible browser (not recommended for first runs) |
+| *(none)* | Open each application and fill every field it recognizes |
+| `--open` | Just open every application in its own tab, fill nothing |
+| `--only=Stripe` | Just one company/title (substring match) |
+| `--headless` | No visible browser — fill + screenshot only |
 
 ## What it will and won't do
 
-**Auto-submits** on Greenhouse, Lever, Ashby, Workable when *all* of these hold:
-the resume uploaded, no CAPTCHA appeared, and every required field was answered
-confidently. Otherwise it fills what it can and leaves the tab open for you.
+**Never submits.** Not on any site, under any flag. It scrolls the submit button into
+view and hands you the tab.
 
-**Never submits** on LinkedIn, Naukri, Indeed, Glassdoor, Instahyre, Cutshort, Wellfound
-or similar portals — their terms forbid automated submission and accounts get banned.
-Those are skipped with a note; use the one-click kits on the Auto-Apply page instead.
+**Never touches** LinkedIn, Naukri, Indeed, Glassdoor, Instahyre, Cutshort, Wellfound or
+similar portals — automating those violates their terms and gets accounts banned. They're
+skipped with a note; use the one-click kits on the Auto-Apply page instead.
 
 **Never fills** voluntary demographic questions (gender, race, veteran, disability) —
 those are yours to answer or leave blank.
 
-**Pauses for you** on CAPTCHAs, Workday's multi-step wizards, unfamiliar required
-questions, and anything the AI marked low-confidence.
+**Flags for you** CAPTCHAs, Workday's multi-step wizards, unfamiliar required questions,
+and anything the AI marked low-confidence.
 
 ## Output
 
 - `results.json` — per-application status, fields filled, and what needed you
-- `screenshots/NN_Company.png` — the filled form (plus `_after.png` once submitted)
+- `screenshots/NN_Company.png` — the filled form
 
-Statuses: `submitted`, `needs_review`, `dry_run_filled`, `filled_no_submit_button`,
-`submit_clicked_unconfirmed`, `skipped_portal`, `error`.
+Statuses: `filled`, `needs_you`, `opened`, `skipped_portal`, `error`.
 
 ## Good practice
 
-- Keep the first live batch small (2–3 jobs) until you trust the output.
-- Read `results.json` after every run — `needs_review` items still need your 30 seconds.
+- Read `results.json` after every run — `needs_you` items still need your 30 seconds.
 - Nothing here stores credentials: no employer logins are used, and the queue file only
   contains your resume PDF, cover letters and answers. Delete it when you're done.

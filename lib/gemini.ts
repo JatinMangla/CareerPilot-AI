@@ -19,7 +19,11 @@ export type Tier = "fast" | "standard" | "deep";
 
 interface ModelSpec {
   id: string;
-  /** 2.5-era models reject `thinkingLevel` outright (400 INVALID_ARGUMENT). */
+  /**
+   * Not every model accepts `thinkingLevel` — the 2.5 era rejected it outright with
+   * 400 INVALID_ARGUMENT. Nothing in the chains below is 2.5-era any more, but the
+   * flag stays: it is the only safe way to pin an older model back into a chain.
+   */
   thinkingLevel: boolean;
 }
 
@@ -28,13 +32,20 @@ interface ModelSpec {
  *   fast     — classification, judging, short interview turns
  *   standard — most work
  *   deep     — text that reaches an employer
+ *
+ * The terminal link used to be gemini-2.5-flash. It is now retired: it still appears
+ * in ListModels, but generateContent answers 404 "no longer available to new users",
+ * so a fresh API key cannot reach it. That made every chain end in a non-transient
+ * error the moment the newer models were contended — the exact case the chain exists
+ * to survive. gemini-3.1-flash-lite replaces it: stable, not preview, and the least
+ * contended tier, so it is the one most likely to answer when the others will not.
  */
 const CHAINS: Record<Tier, { thinking: "low" | "high"; models: ModelSpec[] }> = {
   fast: {
     thinking: "low",
     models: [
       { id: "gemini-3.5-flash-lite", thinkingLevel: true },
-      { id: "gemini-2.5-flash", thinkingLevel: false },
+      { id: "gemini-3.1-flash-lite", thinkingLevel: true },
     ],
   },
   standard: {
@@ -42,7 +53,7 @@ const CHAINS: Record<Tier, { thinking: "low" | "high"; models: ModelSpec[] }> = 
     models: [
       { id: "gemini-3.5-flash", thinkingLevel: true },
       { id: "gemini-3.6-flash", thinkingLevel: true },
-      { id: "gemini-2.5-flash", thinkingLevel: false },
+      { id: "gemini-3.1-flash-lite", thinkingLevel: true },
     ],
   },
   deep: {
@@ -50,7 +61,7 @@ const CHAINS: Record<Tier, { thinking: "low" | "high"; models: ModelSpec[] }> = 
     models: [
       { id: "gemini-3.6-flash", thinkingLevel: true },
       { id: "gemini-3.5-flash", thinkingLevel: true },
-      { id: "gemini-2.5-flash", thinkingLevel: false },
+      { id: "gemini-3.1-flash-lite", thinkingLevel: true },
     ],
   },
 };
