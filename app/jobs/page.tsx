@@ -9,9 +9,12 @@ import { quota } from "@/lib/quota";
 import { isVerifiedSource } from "@/lib/ats";
 import { isBlockedListing } from "@/lib/jobFilters";
 import { roleSuggestions, searchVariants } from "@/lib/roleSuggestions";
+import { Pager, usePaged } from "@/components/Pager";
 import type { Job } from "@/lib/types";
 
 type Focus = "boards" | "yc" | "portals" | "all";
+
+const PAGE_SIZE = 15;
 
 /**
  * Which listing sources belong to each filter.
@@ -82,6 +85,8 @@ export default function JobsPage() {
         .sort((a, b) => b.matchScore - a.matchScore),
     [jobs, focus]
   );
+
+  const { page, pageCount, pageItems, setPage } = usePaged(visible, PAGE_SIZE, focus);
 
   const counts = useMemo(() => {
     const c = {} as Record<Focus, number>;
@@ -436,10 +441,18 @@ export default function JobsPage() {
           })()}
 
           <div className="grid gap-4">
-            {visible.map((job) => (
+            {pageItems.map((job) => (
               <JobCard key={job.id} job={job} onDismiss={() => dismiss(job)} />
             ))}
           </div>
+
+          <Pager
+            page={page}
+            pageCount={pageCount}
+            total={visible.length}
+            unit="matches"
+            onPage={setPage}
+          />
 
           {visible.length > 0 && (
             <div className="card-pad flex items-center justify-between gap-4 flex-wrap">

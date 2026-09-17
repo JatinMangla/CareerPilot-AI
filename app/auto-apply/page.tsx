@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { isBlockedListing } from "@/lib/jobFilters";
 import { openTabs, blockedHint, TAB_BATCH } from "@/lib/openTabs";
+import { Pager, usePaged } from "@/components/Pager";
 import { OUTCOME_STAGES, type Job, type OutcomeStage, type PreparedApplication, type Profile } from "@/lib/types";
+
+const PAGE_SIZE = 15;
 
 const ALL_PORTALS = [
   "Y Combinator",
@@ -205,6 +208,12 @@ export default function AutoApplyPage() {
     .sort((a, b) => b.matchScore - a.matchScore);
   const selectedCount = unprepared.filter((j) => selected[j.id]).length;
 
+  // Paged for rendering only. Selection and "select top N" stay over the whole
+  // list — the point of those buttons is to reach past what is on screen.
+  const queuePage = usePaged(unprepared, PAGE_SIZE, null);
+  const appsList = useMemo(() => apps.slice().reverse(), [apps]);
+  const appsPage = usePaged(appsList, PAGE_SIZE, null);
+
   /** Tick the n best matches at once — this list can be a hundred jobs long. */
   function selectTop(n: number) {
     setSelected(Object.fromEntries(unprepared.slice(0, n).map((j) => [j.id, true])));
@@ -301,7 +310,7 @@ export default function AutoApplyPage() {
             </Link>
           </p>
         )}
-        {unprepared.map((job) => (
+        {queuePage.pageItems.map((job) => (
           <label
             key={job.id}
             className="flex items-center gap-3 rounded-xl px-3 py-2.5 bg-ink-850 hover:bg-ink-800 cursor-pointer"
@@ -329,6 +338,13 @@ export default function AutoApplyPage() {
             </span>
           </label>
         ))}
+        <Pager
+          page={queuePage.page}
+          pageCount={queuePage.pageCount}
+          total={unprepared.length}
+          unit="jobs"
+          onPage={queuePage.setPage}
+        />
       </div>
 
       {/* Prepared applications */}
@@ -343,20 +359,24 @@ export default function AutoApplyPage() {
               ↗ Open next {TAB_BATCH} in tabs
             </button>
           </div>
-          {apps
-            .slice()
-            .reverse()
-            .map((app) => (
-              <AppCard
-                key={app.jobId}
-                app={app}
-                portals={profile?.portals || []}
-                job={jobs.find((j) => j.id === app.jobId)}
-                onApplied={() => markApplied(app.jobId)}
-                onOutcome={(o) => setOutcome(app.jobId, o)}
-                onRemove={(hideJob) => removeApp(app.jobId, hideJob)}
-              />
-            ))}
+          {appsPage.pageItems.map((app) => (
+            <AppCard
+              key={app.jobId}
+              app={app}
+              portals={profile?.portals || []}
+              job={jobs.find((j) => j.id === app.jobId)}
+              onApplied={() => markApplied(app.jobId)}
+              onOutcome={(o) => setOutcome(app.jobId, o)}
+              onRemove={(hideJob) => removeApp(app.jobId, hideJob)}
+            />
+          ))}
+          <Pager
+            page={appsPage.page}
+            pageCount={appsPage.pageCount}
+            total={appsList.length}
+            unit="applications"
+            onPage={appsPage.setPage}
+          />
         </div>
       )}
     </div>

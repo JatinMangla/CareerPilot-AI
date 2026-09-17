@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
+import { Pager, usePaged } from "@/components/Pager";
 import type { Job, ReferralPlan, ReferralRecord, ReferralStage } from "@/lib/types";
 
 const STAGES: { key: ReferralStage; label: string; tone: string }[] = [
@@ -15,6 +16,8 @@ const STAGES: { key: ReferralStage; label: string; tone: string }[] = [
   { key: "declined", label: "Declined", tone: "badge-red" },
 ];
 
+const PAGE_SIZE = 10;
+
 export default function ReferralsPage() {
   const router = useRouter();
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -22,6 +25,10 @@ export default function ReferralsPage() {
   const [busyJob, setBusyJob] = useState("");
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // Newest plan first; stored in creation order.
+  const recordsList = useMemo(() => records.slice().reverse(), [records]);
+  const recordsPage = usePaged(recordsList, PAGE_SIZE, null);
 
   useEffect(() => {
     setJobs(store.getJobs());
@@ -168,13 +175,10 @@ export default function ReferralsPage() {
       </div>
 
       {/* Plans */}
-      {records
-        .slice()
-        .reverse()
-        .map((rec) => {
-          const open = openId === rec.id;
-          const stage = STAGES.find((s) => s.key === rec.stage)!;
-          return (
+      {recordsPage.pageItems.map((rec) => {
+        const open = openId === rec.id;
+        const stage = STAGES.find((s) => s.key === rec.stage)!;
+        return (
             <div key={rec.id} className="card p-5">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
@@ -264,9 +268,17 @@ export default function ReferralsPage() {
                   />
                 </div>
               )}
-            </div>
-          );
-        })}
+          </div>
+        );
+      })}
+
+      <Pager
+        page={recordsPage.page}
+        pageCount={recordsPage.pageCount}
+        total={recordsList.length}
+        unit="plans"
+        onPage={recordsPage.setPage}
+      />
     </div>
   );
 }

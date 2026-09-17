@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask, streamTask } from "@/lib/aiClient";
@@ -8,7 +8,10 @@ import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { detectAts, isVerifiedSource } from "@/lib/ats";
 import { openTabs, blockedHint, TAB_BATCH } from "@/lib/openTabs";
 import { isBlockedListing } from "@/lib/jobFilters";
+import { Pager, usePaged } from "@/components/Pager";
 import type { AutoTailorPlan, Job, QueuedApplication } from "@/lib/types";
+
+const PAGE_SIZE = 15;
 
 export default function AutoPilotPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -285,6 +288,11 @@ export default function AutoPilotPage() {
   const unqueued = jobs
     .filter((j) => !queue.some((q) => q.jobId === j.id) && !isBlockedListing(j.url, j.company))
     .sort((a, b) => b.matchScore - a.matchScore);
+  // Rendering is paged; selection and "queue top N" still span the whole list.
+  const unqueuedPage = usePaged(unqueued, PAGE_SIZE, null);
+  const queueList = useMemo(() => queue.slice().reverse(), [queue]);
+  const queuePage = usePaged(queueList, PAGE_SIZE, null);
+
   const counts = {
     needs: queue.filter((q) => q.status === "needs_approval").length,
     approved: queue.filter((q) => q.status === "approved").length,
@@ -412,7 +420,7 @@ export default function AutoPilotPage() {
             </Link>
           </p>
         ) : (
-          unqueued.map((job) => {
+          unqueuedPage.pageItems.map((job) => {
             const ats = detectAts(job.url);
             return (
               <label
@@ -458,6 +466,13 @@ export default function AutoPilotPage() {
             );
           })
         )}
+        <Pager
+          page={unqueuedPage.page}
+          pageCount={unqueuedPage.pageCount}
+          total={unqueued.length}
+          unit="jobs"
+          onPage={unqueuedPage.setPage}
+        />
       </div>
 
       {/* Queue */}
@@ -483,19 +498,23 @@ export default function AutoPilotPage() {
             </div>
           </div>
 
-          {queue
-            .slice()
-            .reverse()
-            .map((item) => (
-              <QueueCard
-                key={item.jobId}
-                item={item}
-                busy={busy}
-                onApprove={applyApprovals}
-                onRemove={(hideJob) => removeItem(item.jobId, hideJob)}
-                onSubmitted={() => markSubmitted(item.jobId)}
-              />
-            ))}
+          {queuePage.pageItems.map((item) => (
+            <QueueCard
+              key={item.jobId}
+              item={item}
+              busy={busy}
+              onApprove={applyApprovals}
+              onRemove={(hideJob) => removeItem(item.jobId, hideJob)}
+              onSubmitted={() => markSubmitted(item.jobId)}
+            />
+          ))}
+          <Pager
+            page={queuePage.page}
+            pageCount={queuePage.pageCount}
+            total={queueList.length}
+            unit="queued"
+            onPage={queuePage.setPage}
+          />
         </div>
       )}
 

@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
+import { Pager, usePaged } from "@/components/Pager";
 import type { SentEmail } from "@/lib/types";
 
 type Mode = "new" | "reply";
+
+const PAGE_SIZE = 15;
 
 export default function OutreachPage() {
   const [mode, setMode] = useState<Mode>("new");
@@ -25,6 +28,10 @@ export default function OutreachPage() {
   const [success, setSuccess] = useState("");
   const [sent, setSent] = useState<SentEmail[]>([]);
   const [hasResume, setHasResume] = useState(true);
+
+  // Newest first — the list is stored in send order.
+  const sentList = useMemo(() => sent.slice().reverse(), [sent]);
+  const sentPage = usePaged(sentList, PAGE_SIZE, null);
 
   useEffect(() => {
     setSent(store.getEmails());
@@ -352,10 +359,7 @@ export default function OutreachPage() {
         <div className="card-pad">
           <h2 className="h2 mb-4">Sent ({sent.length})</h2>
           <div className="space-y-3">
-            {sent
-              .slice()
-              .reverse()
-              .map((e) => {
+            {sentPage.pageItems.map((e) => {
                 const overdue = e.followUpDue && Date.now() > e.followUpDue;
                 return (
                   <div key={e.id} className="bg-ink-850 rounded-xl p-3">
@@ -395,8 +399,15 @@ export default function OutreachPage() {
                     </div>
                   </div>
                 );
-              })}
+            })}
           </div>
+          <Pager
+            page={sentPage.page}
+            pageCount={sentPage.pageCount}
+            total={sentList.length}
+            unit="emails"
+            onPage={sentPage.setPage}
+          />
         </div>
       )}
     </div>

@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
-import type { InboxMessage, MailCategory } from "@/lib/types";
+import { Pager, usePaged } from "@/components/Pager";
+import type { InboxCursor, InboxMessage, MailCategory } from "@/lib/types";
+
+const PAGE_SIZE = 20;
 
 const TABS: { key: MailCategory | "all" | "action"; label: string; hint: string }[] = [
   { key: "action", label: "Needs action", hint: "Waiting on you" },
@@ -40,6 +43,7 @@ export default function InboxPage() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [openUid, setOpenUid] = useState<string | null>(null);
   const [account, setAccount] = useState("");
 
@@ -49,110 +53,169 @@ export default function InboxPage() {
   }, []);
 
   /**
-   * Pages through everything newer than the cursor. A week away can mean
-   * hundreds of emails, so we keep calling until the backlog is drained
-   * (bounded, and the cursor advances every round so nothing is skipped).
+   * Classifies one page of mail and commits it, then advances the cursor.
+   *
+   * The order matters. The cursor used to move as soon as a page was fetched,
+   * which meant an AI failure — or simply closing the tab — left the cursor past
+   * mail that had never been stored, and that mail could never be fetched again.
+   * Storing first makes an interruption cost a repeat, not a hole.
    */
-  async function sync(full = false, days = 14) {
+  async function commitPage(page: InboxMessage[], cursor: InboxCursor) {
+    const profile = store.getProfile();
+    const classified: Record<string, any> = {};
+    const BATCH = 12;
+
+    const batches: InboxMessage[][] = [];
+    for (let i = 0; i < page.length; i += BATCH) batches.push(page.slice(i, i + BATCH));
+
+    const outcomes = await mapPool(
+      batches,
+      AI_CONCURRENCY,
+      (slice) =>
+        jsonTask<{ results: any[] }>("classify_inbox", {
+          profile,
+          emails: slice.map((m) => ({
+            uid: m.uid,
+            from: m.from,
+            subject: m.subject,
+            date: m.date,
+            snippet: m.snippet,
+          })),
+        }),
+      (done) => setProgress(`Sorting job mail… ${Math.min(done * BATCH, page.length)}/${page.length}`)
+    );
+
+    for (const outcome of outcomes) {
+      for (const r of outcome.value?.results || []) classified[r.uid] = r;
+    }
+    const failedBatches = outcomes.filter((o) => o.error);
+
+    const now = new Date().toISOString();
+    const merged: InboxMessage[] = page.map((m) => {
+      const verdict = classified[m.uid];
+      // An unclassified message is left without a category rather than filed as
+      // not_job — "we couldn't read this" and "this isn't job mail" look the
+      // same in the UI otherwise, and the not_job ones are hidden for good.
+      return verdict
+        ? { ...m, ...verdict, classifiedAt: now }
+        : { ...m, relevance: 0 };
+    });
+
+    // Merge the fresh copy UNDER the stored one. Spreading it on top was the old
+    // behaviour and it wiped `handled` — a re-synced email the user had already
+    // dealt with came back demanding action.
+    const byUid = new Map<string, InboxMessage>();
+    for (const m of store.getInbox()) byUid.set(m.uid, m);
+    for (const m of merged) {
+      const prev = byUid.get(m.uid);
+      byUid.set(m.uid, prev ? { ...m, ...prev } : m);
+    }
+    const all = Array.from(byUid.values()).sort(
+      (a, b) => +new Date(b.date) - +new Date(a.date)
+    );
+
+    store.setInbox(all);
+    setMessages(all);
+
+    // Only now is it safe to say this mail has been seen.
+    if (!failedBatches.length) store.setInboxCursor(cursor);
+    store.setLastSync(new Date().toISOString());
+    setLastSync(store.getLastSync());
+
+    return failedBatches[0]?.error?.message || "";
+  }
+
+  /**
+   * Pages through everything past the cursor. A week away can mean hundreds of
+   * emails, so it keeps calling until the backlog drains, committing each page
+   * as it lands so progress survives a failure mid-run.
+   */
+  async function sync(opts: { rescanDays?: number } = {}) {
+    const rescan = opts.rescanDays;
     setError("");
+    setNotice("");
     setBusy(true);
     setProgress("Connecting to Gmail…");
+
+    let fetched = 0;
+    let classifyError = "";
     try {
-      let cursor = full ? undefined : store.getLastSync() || undefined;
-      const fresh: InboxMessage[] = [];
+      const stored = store.getInboxCursor();
+      let afterUid = rescan ? 0 : stored.uid;
+      let validity = stored.uidValidity;
       let leftover = 0;
-      const MAX_ROUNDS = 8; // up to ~320 emails per click
+      const days = rescan ?? 14;
+      const MAX_ROUNDS = 8; // up to ~640 emails per click
 
       for (let round = 0; round < MAX_ROUNDS; round++) {
         const res = await fetch("/api/inbox/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ since: cursor, limit: 40, days }),
+          body: JSON.stringify({ afterUid, limit: 80, days }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          if (fresh.length === 0) {
+          if (fetched === 0) {
             setError(data.error || `Sync failed (${res.status})`);
             return;
           }
-          break; // keep whatever we already pulled
+          setError(
+            `Stopped after ${fetched} emails: ${data.error || `sync failed (${res.status})`}. ` +
+              `Click Sync again to resume.`
+          );
+          return;
         }
         setAccount(data.account || "");
-        fresh.push(...(data.messages || []));
-        cursor = data.nextSince;
-        store.setLastSync(cursor!); // advance so a later click resumes here
+
+        // Gmail rebuilt the mailbox, so every UID we stored points at different
+        // mail now. Restart from the date window once, rather than resume from a
+        // number that no longer means anything. `validity` is updated before the
+        // retry so this can match at most once and cannot spin.
+        if (validity && data.uidValidity && data.uidValidity !== validity) {
+          validity = data.uidValidity;
+          store.setInboxCursor({ uid: 0, uidValidity: validity });
+          setNotice(`Gmail reset its message ids — rescanning the last ${days} days from scratch.`);
+          afterUid = 0;
+          continue;
+        }
+        validity = data.uidValidity || validity;
+
+        const page: InboxMessage[] = data.messages || [];
         leftover = data.remaining || 0;
+        afterUid = data.nextAfterUid ?? afterUid;
+
+        if (page.length) {
+          fetched += page.length;
+          setProgress(`Reading ${page.length} emails…`);
+          const err = await commitPage(page, { uid: afterUid, uidValidity: validity });
+          if (err) classifyError = err;
+        } else {
+          store.setInboxCursor({ uid: afterUid, uidValidity: validity });
+        }
 
         if (!leftover) break;
-        setProgress(`Fetched ${fresh.length} emails · ${leftover} older still queued…`);
+        setProgress(`Fetched ${fetched} emails · ${leftover} older still queued…`);
       }
 
-      setLastSync(store.getLastSync());
-
-      if (!fresh.length) {
-        setProgress("");
-        setError("No new mail since your last sync.");
+      if (!fetched) {
+        setNotice(
+          rescan
+            ? `Rescanned the last ${days} days — nothing job-related turned up.`
+            : "You're up to date — no new mail since the last sync."
+        );
         return;
       }
-      if (leftover > 0) {
-        setError(
-          `Fetched ${fresh.length} emails. ${leftover} older ones are still queued — click Sync again to continue where this left off.`
-        );
-      }
 
-      // Classify in batches so one huge AI call can't fail everything, and run a
-      // few batches at once — a 300-mail sync used to be 25 round trips end to end.
-      setProgress(`Reading ${fresh.length} emails…`);
-      const profile = store.getProfile();
-      const classified: Record<string, any> = {};
-      const BATCH = 12;
-
-      const batches: InboxMessage[][] = [];
-      for (let i = 0; i < fresh.length; i += BATCH) batches.push(fresh.slice(i, i + BATCH));
-
-      const outcomes = await mapPool(
-        batches,
-        AI_CONCURRENCY,
-        (slice) =>
-          jsonTask<{ results: any[] }>("classify_inbox", {
-            profile,
-            emails: slice.map((m) => ({
-              uid: m.uid,
-              from: m.from,
-              subject: m.subject,
-              date: m.date,
-              snippet: m.snippet,
-            })),
-          }),
-        (done) =>
-          setProgress(`Sorting job mail… ${Math.min(done * BATCH, fresh.length)}/${fresh.length}`)
-      );
-
-      for (const outcome of outcomes) {
-        for (const r of outcome.value?.results || []) classified[r.uid] = r;
-      }
-      const failed = outcomes.filter((o) => o.error);
-      if (failed.length) {
-        setError(`Some mail couldn't be sorted: ${failed[0].error!.message}`);
-      }
-
-      const merged: InboxMessage[] = fresh.map((m) => ({
-        ...m,
-        ...(classified[m.uid] || { category: "not_job", relevance: 0 }),
-      }));
-
-      // keep previously synced mail, newest first, dedup by uid
-      const prev = store.getInbox();
-      const byUid = new Map<string, InboxMessage>();
-      for (const m of [...prev, ...merged]) byUid.set(m.uid, { ...byUid.get(m.uid), ...m });
-      const all = Array.from(byUid.values()).sort(
-        (a, b) => +new Date(b.date) - +new Date(a.date)
-      );
-
-      store.setInbox(all);
-      setMessages(all);
+      const parts = [`Synced ${fetched} email${fetched === 1 ? "" : "s"}.`];
+      if (leftover > 0) parts.push(`${leftover} older ones are still queued — click Sync again to continue.`);
+      setNotice(parts.join(" "));
+      if (classifyError) setError(`Some mail couldn't be sorted: ${classifyError}`);
     } catch (err: any) {
-      setError(err.message);
+      setError(
+        fetched
+          ? `Stopped after ${fetched} emails: ${err.message}. Click Sync again to resume.`
+          : err.message
+      );
     } finally {
       setBusy(false);
       setProgress("");
@@ -201,6 +264,8 @@ export default function InboxPage() {
 
   const hidden = messages.length - jobMail.length;
 
+  const { page, pageCount, pageItems, setPage } = usePaged(visible, PAGE_SIZE, tab);
+
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -212,21 +277,21 @@ export default function InboxPage() {
           </p>
         </div>
         <div className="flex gap-2 items-center">
-          <button className="btn-primary" onClick={() => sync(false)} disabled={busy}>
+          <button className="btn-primary" onClick={() => sync()} disabled={busy}>
             {busy ? "Syncing…" : lastSync ? "⟳ Sync new mail" : "⟳ Sync my inbox"}
           </button>
           <select
             className="input w-auto py-2 text-xs"
-            defaultValue="14"
+            defaultValue=""
             disabled={busy}
             onChange={(e) => {
               const d = Number(e.target.value);
-              if (d) sync(true, d);
-              e.target.value = "14";
+              e.target.value = "";
+              if (d) sync({ rescanDays: d });
             }}
             title="Re-scan a full period, ignoring the sync cursor"
           >
-            <option value="14">Rescan…</option>
+            <option value="">Rescan…</option>
             <option value="7">Last 7 days</option>
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
@@ -243,6 +308,18 @@ export default function InboxPage() {
       {progress && (
         <div className="text-sm text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3 animate-pulse">
           {progress}
+        </div>
+      )}
+      {notice && !busy && (
+        <div className="text-sm text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3 flex items-start gap-3">
+          <span className="flex-1">{notice}</span>
+          <button
+            className="text-ink-400 hover:text-ink-200 shrink-0"
+            onClick={() => setNotice("")}
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
         </div>
       )}
       {error && (
@@ -290,7 +367,7 @@ export default function InboxPage() {
                 Nothing here right now.
               </div>
             )}
-            {visible.map((m) => {
+            {pageItems.map((m) => {
               const open = openUid === m.uid;
               return (
                 <div
@@ -370,6 +447,17 @@ export default function InboxPage() {
               );
             })}
           </div>
+
+          <Pager
+            page={page}
+            pageCount={pageCount}
+            total={visible.length}
+            unit="emails"
+            onPage={(p) => {
+              setPage(p);
+              setOpenUid(null); // an expanded body on the page we just left
+            }}
+          />
         </>
       )}
     </div>

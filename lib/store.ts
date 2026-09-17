@@ -10,6 +10,7 @@ import type {
   SentEmail,
   ReferralRecord,
   InboxMessage,
+  InboxCursor,
   OutreachDraft,
   Strategy,
   UsageStats,
@@ -30,6 +31,7 @@ const KEYS = {
   referrals: "cp_referrals",
   inbox: "cp_inbox",
   lastSync: "cp_last_sync",
+  inboxCursor: "cp_inbox_cursor",
   draft: "cp_outreach_draft",
   brief: "cp_improve_brief",
   strategy: "cp_strategy",
@@ -489,6 +491,17 @@ export const store = {
 
   getLastSync: () => read<string | null>(KEYS.lastSync, null),
   setLastSync: (iso: string) => write(KEYS.lastSync, iso),
+
+  /**
+   * IMAP pagination cursor. `uid` is only meaningful for the mailbox generation
+   * named by `uidValidity` — if Gmail rebuilds INBOX that number changes and the
+   * stored uid must be thrown away, or we would resume from a UID belonging to
+   * different mail. The page only advances this after the mail it covers has
+   * been written to the inbox, so an interrupted sync resumes, never skips.
+   */
+  getInboxCursor: () =>
+    read<InboxCursor>(KEYS.inboxCursor, { uid: 0, uidValidity: "" }),
+  setInboxCursor: (c: InboxCursor) => write(KEYS.inboxCursor, c),
 
   /**
    * Hand the fixes from Validate Resume to the "Improve with AI" panel.

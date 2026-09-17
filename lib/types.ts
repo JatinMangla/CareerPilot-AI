@@ -236,6 +236,15 @@ export type MailCategory =
   | "bulk_requirement"
   | "not_job";
 
+/**
+ * Where the last IMAP sync stopped. A UID is only comparable within one
+ * mailbox generation, so it travels with the `uidValidity` it was issued under.
+ */
+export interface InboxCursor {
+  uid: number;
+  uidValidity: string;
+}
+
 export interface InboxMessage {
   uid: string;
   from: string;
@@ -255,6 +264,8 @@ export interface InboxMessage {
   suggestedAction?: string;
   deadline?: string;
   handled?: boolean;
+  /** Set locally when triage ran, so a re-sync doesn't re-pay for classification. */
+  classifiedAt?: string;
 }
 
 export interface OutreachDraft {

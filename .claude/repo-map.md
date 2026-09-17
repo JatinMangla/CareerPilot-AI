@@ -2,7 +2,7 @@
 
 <!-- GENERATED FILE. Do not edit by hand: node scripts/repo-map.mjs -->
 
-_65 source files · 15 pages · 11 API routes · 19 AI tasks · generated 2026-09-08_
+_66 source files · 15 pages · 11 API routes · 19 AI tasks · generated 2026-09-17_
 
 **Read this before exploring.** It is regenerated from the source, so it does not drift.
 For import relationships see [docs/dep-graph.md](../docs/dep-graph.md).
@@ -66,7 +66,7 @@ cross-device sync.
 |   |   |   `-- route.ts  (106)
 |   |   |-- inbox/
 |   |   |   `-- sync/
-|   |   |       `-- route.ts  (147)
+|   |   |       `-- route.ts  (175)
 |   |   |-- jobs/
 |   |   |   `-- route.ts  (253)
 |   |   |-- parse-resume/
@@ -74,27 +74,27 @@ cross-device sync.
 |   |   `-- state/
 |   |       `-- route.ts  (113)
 |   |-- auto-apply/
-|   |   `-- page.tsx  (558)
+|   |   `-- page.tsx  (578)
 |   |-- autopilot/
-|   |   `-- page.tsx  (763)
+|   |   `-- page.tsx  (782)
 |   |-- evolve/
 |   |   `-- page.tsx  (466)
 |   |-- github/
 |   |   `-- page.tsx  (243)
 |   |-- inbox/
-|   |   `-- page.tsx  (378)
+|   |   `-- page.tsx  (466)
 |   |-- interview/
 |   |   `-- page.tsx  (347)
 |   |-- jobs/
-|   |   `-- page.tsx  (566)
+|   |   `-- page.tsx  (579)
 |   |-- login/
 |   |   `-- page.tsx  (221)
 |   |-- outreach/
-|   |   `-- page.tsx  (405)
+|   |   `-- page.tsx  (416)
 |   |-- practice/
 |   |   `-- page.tsx  (252)
 |   |-- referrals/
-|   |   `-- page.tsx  (315)
+|   |   `-- page.tsx  (327)
 |   |-- resume/
 |   |   `-- page.tsx  (447)
 |   |-- tailor/
@@ -106,6 +106,7 @@ cross-device sync.
 |   |-- layout.tsx  (24)
 |   `-- page.tsx  (276)
 |-- components/   # shared client components
+|   |-- Pager.tsx  (123)
 |   |-- Shell.tsx  (124)
 |   |-- SyncProvider.tsx  (99)
 |   `-- UsageBanner.tsx  (43)
@@ -130,8 +131,8 @@ cross-device sync.
 |   |-- rateLimit.ts  (39)
 |   |-- roleSuggestions.ts  (88)
 |   |-- stableJson.ts  (22)
-|   |-- store.ts  (522)
-|   `-- types.ts  (315)
+|   |-- store.ts  (535)
+|   `-- types.ts  (326)
 |-- scripts/   # repo tooling — run with plain node, no npm
 |   |-- hooks/
 |   |   |-- after-edit.mjs  (63)
@@ -162,17 +163,17 @@ cross-device sync.
 | URL | File | Lines |
 | --- | --- | --- |
 | `/` | [app/page.tsx](../app/page.tsx) | 276 |
-| `/auto-apply` | [app/auto-apply/page.tsx](../app/auto-apply/page.tsx) | 558 |
-| `/autopilot` | [app/autopilot/page.tsx](../app/autopilot/page.tsx) | 763 |
+| `/auto-apply` | [app/auto-apply/page.tsx](../app/auto-apply/page.tsx) | 578 |
+| `/autopilot` | [app/autopilot/page.tsx](../app/autopilot/page.tsx) | 782 |
 | `/evolve` | [app/evolve/page.tsx](../app/evolve/page.tsx) | 466 |
 | `/github` | [app/github/page.tsx](../app/github/page.tsx) | 243 |
-| `/inbox` | [app/inbox/page.tsx](../app/inbox/page.tsx) | 378 |
+| `/inbox` | [app/inbox/page.tsx](../app/inbox/page.tsx) | 466 |
 | `/interview` | [app/interview/page.tsx](../app/interview/page.tsx) | 347 |
-| `/jobs` | [app/jobs/page.tsx](../app/jobs/page.tsx) | 566 |
+| `/jobs` | [app/jobs/page.tsx](../app/jobs/page.tsx) | 579 |
 | `/login` | [app/login/page.tsx](../app/login/page.tsx) | 221 |
-| `/outreach` | [app/outreach/page.tsx](../app/outreach/page.tsx) | 405 |
+| `/outreach` | [app/outreach/page.tsx](../app/outreach/page.tsx) | 416 |
 | `/practice` | [app/practice/page.tsx](../app/practice/page.tsx) | 252 |
-| `/referrals` | [app/referrals/page.tsx](../app/referrals/page.tsx) | 315 |
+| `/referrals` | [app/referrals/page.tsx](../app/referrals/page.tsx) | 327 |
 | `/resume` | [app/resume/page.tsx](../app/resume/page.tsx) | 447 |
 | `/tailor` | [app/tailor/page.tsx](../app/tailor/page.tsx) | 291 |
 | `/validate` | [app/validate/page.tsx](../app/validate/page.tsx) | 306 |
@@ -235,6 +236,7 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | --- | --- | --- | --- |
 | [app/error.tsx](../app/error.tsx) | 45 | Error | 0 |
 | [app/layout.tsx](../app/layout.tsx) | 24 | RootLayout, metadata | 0 |
+| [components/Pager.tsx](../components/Pager.tsx) | 123 | Pager, usePaged | 6 |
 | [components/Shell.tsx](../components/Shell.tsx) | 124 | Shell | 1 |
 | [components/SyncProvider.tsx](../components/SyncProvider.tsx) | 99 | SyncBadge, SyncProvider | 1 |
 | [components/UsageBanner.tsx](../components/UsageBanner.tsx) | 43 | UsageBanner | 1 |
@@ -255,8 +257,8 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | [lib/rateLimit.ts](../lib/rateLimit.ts) | 39 | RateLimitResult, rateLimit | 3 |
 | [lib/roleSuggestions.ts](../lib/roleSuggestions.ts) | 88 | roleSuggestions, searchVariants | 1 |
 | [lib/stableJson.ts](../lib/stableJson.ts) | 22 | stableStringify | 2 |
-| [lib/store.ts](../lib/store.ts) | 522 | defaultProfile, defaultStats, defaultStrategy, store, sync | 16 |
-| [lib/types.ts](../lib/types.ts) | 315 | AutoTailorPlan, DismissedJob, ImprovementBrief, InboxMessage, Job, MailCategory, OUTCOME_STAGES, OutcomeStage, +20 | 16 |
+| [lib/store.ts](../lib/store.ts) | 535 | defaultProfile, defaultStats, defaultStrategy, store, sync | 16 |
+| [lib/types.ts](../lib/types.ts) | 326 | AutoTailorPlan, DismissedJob, ImprovementBrief, InboxCursor, InboxMessage, Job, MailCategory, OUTCOME_STAGES, +21 | 16 |
 | [middleware.ts](../middleware.ts) | 36 | config, middleware | 0 |
 | [next.config.mjs](../next.config.mjs) | 15 | — | 0 |
 | [postcss.config.mjs](../postcss.config.mjs) | 10 | — | 0 |
