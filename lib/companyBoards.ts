@@ -166,6 +166,10 @@ export interface BoardListing {
   yc: boolean;
   /** Team / department, where the ATS exposes it — useful context for scoring. */
   department?: string;
+  /** The requirements-bearing part of the job description, as plain text. */
+  description?: string;
+  /** Greenhouse only: where the full posting is, fetched for the final shortlist. */
+  detailUrl?: string;
 }
 
 /** Titles that are unambiguously frontend work. */
@@ -206,13 +210,42 @@ const WEAK_HINTS = [
  * Non-engineering roles that share vocabulary with engineering titles
  * ("Sales Engineer", "Developer Advocate", "Technical Recruiter") and would
  * otherwise flood the list now that 120 boards are read instead of 22.
+ * "salesforce" is listed because `\bsales\b` does not fire on it.
+ *
+ * A title that is ALSO clearly frontend work survives this: "Frontend Platform
+ * Engineer" used to be dropped for containing "platform engineer".
  */
 const EXCLUDE_RE =
-  /\b(sales|account executive|recruit|talent|marketing|content|seo|people ops|finance|accounting|legal|counsel|support engineer|customer success|solutions? (engineer|architect|consultant)|developer advocate|technical writer|program manager|product manager|project manager|data scientist|machine learning|research scientist|security engineer|site reliability|devops|infrastructure engineer|platform engineer|quality assurance|test engineer|hardware|mechanical|electrical|firmware|intern|internship)\b/i;
+  /\b(sales|salesforce|account executive|recruit|talent|marketing|content|seo|people ops|finance|accounting|legal|counsel|support engineer|customer success|solutions? (engineer|architect|consultant)|developer advocate|technical writer|program manager|product manager|project manager|data scientist|machine learning|research scientist|security engineer|site reliability|devops|infrastructure engineer|platform engineer|quality assurance|test engineer|hardware|mechanical|electrical|firmware|intern|internship)\b/i;
 
-/** Too senior for a 1-3 year candidate — these are a guaranteed rejection. */
-const TOO_SENIOR_RE =
-  /\b(staff|principal|director|vp|vice president|head of|manager|architect|distinguished|fellow)\b/i;
+/** Only a Director/VP/Head/Manager title is out of reach whatever the experience. */
+const ALWAYS_TOO_SENIOR_RE = /\b(director|vp|vice president|head of|manager|distinguished|fellow)\b/i;
+/** Individual-contributor levels that need roughly eight years or more. */
+const STAFF_RE = /\b(staff|principal|architect)\b/i;
+
+/**
+ * Words that say nothing about the role. The search box's words used to admit
+ * any title containing them, so the default query's "developer" let in
+ * "Salesforce Developer" and "engineer" let in every backend and iOS role.
+ */
+const GENERIC_TERMS = new Set([
+  "developer",
+  "developers",
+  "engineer",
+  "engineers",
+  "engineering",
+  "software",
+  "senior",
+  "junior",
+  "lead",
+  "jobs",
+  "job",
+  "role",
+  "roles",
+  "remote",
+  "india",
+  "hiring",
+]);
 
 function roleRank(title: string): number {
   const t = title.toLowerCase();
@@ -222,12 +255,16 @@ function roleRank(title: string): number {
 }
 
 /**
- * Roles asking for more experience than the candidate has are still worth
- * showing — "Senior" in India often means three years — but they should not
- * push the roles that actually fit off the top of the list.
+ * Is this title at the wrong level for someone with `years` of experience?
+ * 0 = right level, 1 = a stretch either way. "Senior" in India often means
+ * three to five years, so it is a stretch only for someone newer than that —
+ * and for someone past it, a junior title is the stretch.
  */
-function seniorityPenalty(title: string): number {
-  return /\b(senior|sr\.?|lead|iii|iv)\b/i.test(title) ? 1 : 0;
+function levelMismatch(title: string, years: number): number {
+  const senior = /\b(senior|sr\.?|lead|iii|iv)\b/i.test(title);
+  const junior = /\b(junior|jr\.?|associate|entry|graduate|fresher|trainee)\b/i.test(title);
+  if (years >= 4) return junior ? 1 : 0;
+  return senior ? 1 : 0;
 }
 
 /**
@@ -236,21 +273,78 @@ function seniorityPenalty(title: string): number {
  * `extraTerms` are the words from the search box, so a search for "node backend"
  * still finds work even though nothing in it is a frontend hint.
  */
-export function matchesRole(title: string, extraTerms: string[]): boolean {
+export function matchesRole(title: string, extraTerms: string[], years = 2): boolean {
   const t = title.toLowerCase();
-  if (EXCLUDE_RE.test(t)) return false;
-  // "Senior Frontend Engineer" is worth a shot; "Engineering Manager" is not.
-  if (TOO_SENIOR_RE.test(t)) return false;
-  if (roleRank(title) > 0) return true;
-  return extraTerms.some((w) => w.length > 3 && t.includes(w));
+  const rank = roleRank(title);
+  if (EXCLUDE_RE.test(t) && rank < 2) return false;
+  if (ALWAYS_TOO_SENIOR_RE.test(t)) return false;
+  if (STAFF_RE.test(t) && years < 8) return false;
+  if (rank > 0) return true;
+  return extraTerms.some((w) => w.length > 3 && !GENERIC_TERMS.has(w) && t.includes(w));
 }
 
-async function fetchJson(url: string, ms = 9000): Promise<any | null> {
+/* ---------------- descriptions ---------------- */
+
+const ENTITIES: Record<string, string> = {
+  "&lt;": "<",
+  "&gt;": ">",
+  "&amp;": "&",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&apos;": "'",
+  "&nbsp;": " ",
+};
+
+/** Greenhouse returns HTML with its tags entity-escaped; reduce either to text. */
+export function htmlToText(html: string): string {
+  const decoded = (html || "").replace(/&(lt|gt|amp|quot|#39|apos|nbsp);/g, (m) => ENTITIES[m] ?? m);
+  return decoded
+    .replace(/<(br|\/p|\/li|\/h\d|\/div)\s*\/?>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "- ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&(lt|gt|amp|quot|#39|apos|nbsp);/g, (m) => ENTITIES[m] ?? m)
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n+/g, "\n")
+    .trim();
+}
+
+const REQUIREMENTS_RE =
+  /(requirements|qualifications|what you('|’)ll need|what we('|’)re looking for|you have|you bring|must have|about you|who you are|experience with|\d\+?\s*years)/i;
+
+/**
+ * The part of a description worth scoring against. Postings open with a company
+ * pitch; the first 1,500 characters are often nothing but that, and the stack and
+ * years sit further down. Starts a little before the requirements when it can
+ * find them.
+ */
+export function jdExcerpt(text: string, max = 1800): string {
+  const t = (text || "").trim();
+  if (t.length <= max) return t;
+  const at = t.search(REQUIREMENTS_RE);
+  const start = at > 200 ? at - 200 : 0;
+  return t.slice(start, start + max);
+}
+
+/* ---------------- fetching ---------------- */
+
+/** Board contents change slowly; a search reads a cached copy for this long. */
+const BOARD_REVALIDATE_SEC = 30 * 60;
+
+async function fetchJson(
+  url: string,
+  ms: number,
+  revalidate = BOARD_REVALIDATE_SEC
+): Promise<any | null> {
+  if (ms <= 0) return null;
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), ms);
-    const res = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
-    clearTimeout(timer);
+    // The timeout covers reading the body too: large boards (Stripe, Airbnb) are
+    // megabytes, and clearing the timer at the headers left that part unbounded.
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(ms),
+      // Vercel's data cache: repeated searches stop re-downloading ~15k postings.
+      // Responses over its 2MB item limit simply aren't cached.
+      next: { revalidate },
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -258,26 +352,36 @@ async function fetchJson(url: string, ms = 9000): Promise<any | null> {
   }
 }
 
-async function fetchBoard(board: CompanyBoard): Promise<BoardListing[]> {
+function leverText(j: any): string {
+  const lists = Array.isArray(j.lists)
+    ? j.lists.map((l: any) => `${l.text || ""}:\n${htmlToText(l.content || "")}`).join("\n")
+    : "";
+  return [j.descriptionPlain || "", lists, j.additionalPlain || ""].filter(Boolean).join("\n");
+}
+
+async function fetchBoard(board: CompanyBoard, ms: number): Promise<BoardListing[]> {
   if (board.ats === "greenhouse") {
-    const data = await fetchJson(
-      `https://boards-api.greenhouse.io/v1/boards/${board.slug}/jobs`
-    );
+    const data = await fetchJson(`https://boards-api.greenhouse.io/v1/boards/${board.slug}/jobs`, ms);
     return (data?.jobs || []).map((j: any) => ({
       id: `gh-${board.slug}-${j.id}`,
       title: j.title,
       company: board.name,
       location: j.location?.name || "",
       url: j.absolute_url,
-      postedAt: j.updated_at,
+      // updated_at moves whenever a recruiter edits an old posting, which made
+      // stale roles rank as new. first_published is when it actually went up.
+      postedAt: j.first_published || j.updated_at,
       ats: "greenhouse",
       yc: !!board.yc,
       department: j.departments?.[0]?.name || "",
+      // The list endpoint carries no description; `?content=true` would make
+      // every board several megabytes. Fetched per job, for the shortlist only.
+      detailUrl: `https://boards-api.greenhouse.io/v1/boards/${board.slug}/jobs/${j.id}`,
     }));
   }
 
   if (board.ats === "lever") {
-    const data = await fetchJson(`https://api.lever.co/v0/postings/${board.slug}?mode=json`);
+    const data = await fetchJson(`https://api.lever.co/v0/postings/${board.slug}?mode=json`, ms);
     return (Array.isArray(data) ? data : []).map((j: any) => ({
       id: `lv-${board.slug}-${j.id}`,
       title: j.text,
@@ -288,12 +392,13 @@ async function fetchBoard(board: CompanyBoard): Promise<BoardListing[]> {
       ats: "lever",
       yc: !!board.yc,
       department: j.categories?.team || "",
+      // Lever sends the full posting in the list — it was being downloaded and
+      // thrown away while the AI scored the job from its title alone.
+      description: jdExcerpt(leverText(j)),
     }));
   }
 
-  const data = await fetchJson(
-    `https://api.ashbyhq.com/posting-api/job-board/${board.slug}`
-  );
+  const data = await fetchJson(`https://api.ashbyhq.com/posting-api/job-board/${board.slug}`, ms);
   return (data?.jobs || []).map((j: any) => ({
     id: `ab-${board.slug}-${j.id}`,
     title: j.title,
@@ -304,18 +409,22 @@ async function fetchBoard(board: CompanyBoard): Promise<BoardListing[]> {
     ats: "ashby",
     yc: !!board.yc,
     department: j.department || j.team || "",
+    description: jdExcerpt(j.descriptionPlain || htmlToText(j.descriptionHtml || "")),
   }));
 }
 
 /**
- * Reads every board with a bounded number of requests open at once.
+ * Reads every board with a bounded number of requests open at once, and stops
+ * starting new ones at the deadline — a search that returns 90% of the boards is
+ * better than one killed by the function timeout with nothing.
  *
  * `Promise.allSettled` over all of them at once was fine at 22 boards and starts
- * timing out its own requests at 120 — the later fetches spend their 9s budget
+ * timing out its own requests at 120 — the later fetches spend their budget
  * queued behind the earlier ones rather than in flight.
  */
 async function fetchAllBoards(
   boards: CompanyBoard[],
+  deadline: number,
   concurrency = 20
 ): Promise<BoardListing[]> {
   const all: BoardListing[] = [];
@@ -324,8 +433,10 @@ async function fetchAllBoards(
     for (;;) {
       const i = next++;
       if (i >= boards.length) return;
+      const left = deadline - Date.now();
+      if (left < 1000) return;
       try {
-        all.push(...(await fetchBoard(boards[i])));
+        all.push(...(await fetchBoard(boards[i], Math.min(9000, left))));
       } catch {
         /* one dead board must not take the whole search down */
       }
@@ -335,18 +446,47 @@ async function fetchAllBoards(
   return all;
 }
 
+/** Fills in Greenhouse descriptions for the listings that made the cut. */
+async function fillGreenhouseDescriptions(list: BoardListing[], deadline: number) {
+  const todo = list.filter((j) => j.detailUrl && !j.description);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= todo.length) return;
+      const left = deadline - Date.now();
+      if (left < 800) return;
+      const data = await fetchJson(todo[i].detailUrl!, Math.min(6000, left), 6 * 60 * 60);
+      if (data?.content) todo[i].description = jdExcerpt(htmlToText(data.content));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(20, todo.length) }, worker));
+}
+
 /** Fetches every board in parallel and returns roles matching the search. */
 export async function searchCompanyBoards(opts: {
   query: string;
+  /** Other phrasings of the role, from the profile. */
+  variants?: string[];
   location?: string;
   ycOnly?: boolean;
   limit?: number;
+  /** Candidate's years of experience; decides which levels are reachable. */
+  years?: number;
+  /** Epoch ms after which no new request starts. */
+  deadline?: number;
 }): Promise<BoardListing[]> {
   const { query, location, ycOnly, limit = 60 } = opts;
+  const years = Number.isFinite(opts.years) ? Number(opts.years) : 2;
+  const deadline = opts.deadline ?? Date.now() + 40_000;
   const boards = ycOnly ? COMPANY_BOARDS.filter((b) => b.yc) : COMPANY_BOARDS;
-  const terms = query.toLowerCase().split(/[^a-z.]+/).filter(Boolean);
+  const terms = [query, ...(opts.variants || [])]
+    .join(" ")
+    .toLowerCase()
+    .split(/[^a-z.]+/)
+    .filter(Boolean);
 
-  const all = await fetchAllBoards(boards);
+  const all = await fetchAllBoards(boards, deadline);
 
   // Location matching is shared with the aggregator results in the API route, so
   // a job is judged reachable by the same rule wherever it came from.
@@ -354,7 +494,7 @@ export async function searchCompanyBoards(opts: {
     (j) =>
       j.title &&
       j.url &&
-      matchesRole(j.title, terms) &&
+      matchesRole(j.title, terms, years) &&
       matchesLocation(j.location, location || "")
   );
 
@@ -363,8 +503,8 @@ export async function searchCompanyBoards(opts: {
   matched.sort((a, b) => {
     const rank = roleRank(b.title) - roleRank(a.title);
     if (rank !== 0) return rank;
-    const seniority = seniorityPenalty(a.title) - seniorityPenalty(b.title);
-    if (seniority !== 0) return seniority;
+    const level = levelMismatch(a.title, years) - levelMismatch(b.title, years);
+    if (level !== 0) return level;
     const aIn = INDIA_RE.test(a.location) ? 1 : 0;
     const bIn = INDIA_RE.test(b.location) ? 1 : 0;
     if (aIn !== bIn) return bIn - aIn;
@@ -379,5 +519,7 @@ export async function searchCompanyBoards(opts: {
    * result budget on copies of one job — the user's "why am I seeing the same
    * job over and over" — and then had nothing left for the other 120 boards.
    */
-  return dedupeJobs(matched).slice(0, limit);
+  const shortlist = dedupeJobs(matched).slice(0, limit);
+  await fillGreenhouseDescriptions(shortlist, deadline + 8_000);
+  return shortlist;
 }

@@ -18,6 +18,7 @@ import type {
   DismissedJob,
 } from "./types";
 import { fingerprint, sourceRank } from "./jobFilters";
+import { diffList, hashList, isCollection, type IncomingEntry } from "./syncMerge";
 
 const KEYS = {
   resume: "cp_resume",
@@ -44,18 +45,27 @@ const KEYS = {
  * localStorage stays the instant, synchronous cache so every page keeps
  * its simple `store.getX()` API. Each write also stamps the key and
  * schedules a debounced push to the server, and `pull()` merges anything
- * newer that another device wrote. Last write wins, per key.
+ * newer that another device wrote. The merge rules are in lib/syncMerge.ts.
  * ------------------------------------------------------------------ */
 
-const META_KEY = "cp_meta"; // { [key]: lastModified }
-const DEVICE_ONLY = new Set<string>(["cp_outreach_draft", "cp_meta"]);
+const META_KEY = "cp_meta"; // { [key]: when this device last changed it }
+const REV_KEY = "cp_sync_rev"; // { [key]: server revision this device last synced }
+const DIRTY_KEY = "cp_sync_dirty"; // keys changed here that the server has not confirmed
+const BASE_KEY = "cp_sync_base"; // lists only: { [key]: { id: hash } } as last synced
+const DEVICE_ONLY = new Set<string>(["cp_outreach_draft", META_KEY, REV_KEY, DIRTY_KEY, BASE_KEY]);
 
-type SyncState = "off" | "idle" | "syncing" | "error";
+/**
+ * "expired" is not "off". A 401 used to read as "no database", which switched
+ * sync off for the rest of the session while the badge said "This device only" —
+ * every later change quietly stayed on one device.
+ */
+type SyncState = "off" | "idle" | "syncing" | "error" | "expired";
 let syncState: SyncState = "off";
 let syncError = "";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
-const dirty = new Set<string>();
+let pushing: Promise<void> | null = null;
 const listeners = new Set<() => void>();
+const dataListeners = new Set<(keys: string[]) => void>();
 
 function notify() {
   listeners.forEach((fn) => {
@@ -67,26 +77,21 @@ function notify() {
   });
 }
 
+/** Tells open pages that another device's data just replaced theirs. */
+function notifyData(keys: string[]) {
+  dataListeners.forEach((fn) => {
+    try {
+      fn(keys);
+    } catch {
+      /* ignore listener errors */
+    }
+  });
+}
+
 function setSyncState(s: SyncState, err = "") {
   syncState = s;
   syncError = err;
   notify();
-}
-
-function readMeta(): Record<string, number> {
-  if (typeof window === "undefined") return {};
-  try {
-    return JSON.parse(window.localStorage.getItem(META_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function stamp(key: string, at = Date.now()) {
-  if (typeof window === "undefined") return;
-  const meta = readMeta();
-  meta[key] = at;
-  window.localStorage.setItem(META_KEY, JSON.stringify(meta));
 }
 
 function read<T>(key: string, fallback: T): T {
@@ -108,42 +113,134 @@ function safeSet(key: string, raw: string): boolean {
     console.error(`[store] could not save "${key}" — storage full?`, err);
     setSyncState(
       "error",
-      "This device's storage is full. Older Job Inbox mail is the usual cause — sync still works on your other devices."
+      "This device's storage is full, so the last change was not saved here. The Job Inbox is the usual cause — a sync there trims old non-job mail."
     );
     return false;
   }
 }
 
-function write<T>(key: string, value: T) {
-  if (typeof window === "undefined") return;
-  if (!safeSet(key, JSON.stringify(value))) return;
-  if (DEVICE_ONLY.has(key)) return;
-  stamp(key);
-  dirty.add(key);
+const readMeta = () => read<Record<string, number>>(META_KEY, {});
+const saveMeta = (m: Record<string, number>) => safeSet(META_KEY, JSON.stringify(m));
+const readRevs = () => read<Record<string, number>>(REV_KEY, {});
+const saveRevs = (r: Record<string, number>) => safeSet(REV_KEY, JSON.stringify(r));
+const readDirty = () => new Set(read<string[]>(DIRTY_KEY, []));
+const saveDirty = (d: Set<string>) => safeSet(DIRTY_KEY, JSON.stringify(Array.from(d)));
+
+/** Records what a list looked like when it last matched the server. */
+function saveBase(key: string, value: unknown) {
+  if (!isCollection(key)) return;
+  const base = read<Record<string, Record<string, string>>>(BASE_KEY, {});
+  base[key] = hashList(key, value);
+  safeSet(BASE_KEY, JSON.stringify(base));
+}
+
+/**
+ * The unsynced set is persisted, not held in memory. In memory it died with the
+ * tab — close the app offline and the change was never uploaded at all.
+ * Returns false when the value could not be saved on this device.
+ */
+function write<T>(key: string, value: T): boolean {
+  if (typeof window === "undefined") return false;
+  if (!safeSet(key, JSON.stringify(value))) return false;
+  if (DEVICE_ONLY.has(key)) return true;
+  const meta = readMeta();
+  meta[key] = Date.now();
+  saveMeta(meta);
+  const dirty = readDirty();
+  if (!dirty.has(key)) {
+    dirty.add(key);
+    saveDirty(dirty);
+  }
   schedulePush();
+  return true;
 }
 
 function schedulePush(delay = 1200) {
-  if (typeof window === "undefined" || syncState === "off") return;
+  if (typeof window === "undefined" || syncState === "off" || syncState === "expired") return;
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => void push(), delay);
 }
 
-/** Collects the pending changes as a payload, without clearing them. */
-function pendingPayload(): Record<string, { value: unknown; at: number }> | null {
-  if (typeof window === "undefined" || dirty.size === 0) return null;
+interface Pending {
+  data: Record<string, IncomingEntry>;
+  /** Each key's local timestamp when the payload was built. */
+  snapshot: Record<string, number>;
+}
+
+/**
+ * The unsynced changes as a payload. Lists go as patches — only the items that
+ * changed since the last sync — which is also what keeps the beacon below its
+ * 64KB limit: the whole inbox never fit, so its last-gasp save always failed.
+ */
+function pendingPayload(): Pending | null {
+  if (typeof window === "undefined") return null;
+  const dirty = readDirty();
+  if (!dirty.size) return null;
   const meta = readMeta();
-  const data: Record<string, { value: unknown; at: number }> = {};
+  const revs = readRevs();
+  const base = read<Record<string, Record<string, string>>>(BASE_KEY, {});
+  const data: Record<string, IncomingEntry> = {};
+  const snapshot: Record<string, number> = {};
+  let pruned = false;
+
   for (const k of Array.from(dirty)) {
     const raw = window.localStorage.getItem(k);
-    if (raw === null) continue;
+    let value: unknown;
     try {
-      data[k] = { value: JSON.parse(raw), at: meta[k] || Date.now() };
+      if (raw === null) throw new Error("gone");
+      value = JSON.parse(raw);
     } catch {
-      /* skip unparseable */
+      dirty.delete(k); // nothing left to send
+      pruned = true;
+      continue;
     }
+    const at = meta[k] || Date.now();
+    snapshot[k] = at;
+    const baseRev = revs[k] ?? 0;
+    data[k] = isCollection(k)
+      ? { at, baseRev, patch: diffList(k, value, base[k]) }
+      : { at, baseRev, value };
   }
-  return Object.keys(data).length ? data : null;
+  if (pruned) saveDirty(dirty);
+  return Object.keys(data).length ? { data, snapshot } : null;
+}
+
+/** Applies the server's answer to a push: new revisions, and any merged values. */
+function applyResults(
+  results: Record<string, { rev: number; at: number; value?: unknown }>,
+  snapshot: Record<string, number>
+) {
+  const meta = readMeta();
+  const revs = readRevs();
+  const dirty = readDirty();
+  const changed: string[] = [];
+
+  for (const [k, r] of Object.entries(results)) {
+    // Changed again while the request was in flight: stay dirty, and keep the
+    // old revision so the next push is merged rather than fast-forwarded.
+    if (meta[k] !== snapshot[k]) continue;
+    revs[k] = r.rev;
+    if (r.value !== undefined) {
+      if (!safeSet(k, JSON.stringify(r.value))) continue;
+      meta[k] = r.at;
+      saveBase(k, r.value);
+      changed.push(k);
+    } else {
+      saveBase(k, read<unknown>(k, null));
+    }
+    dirty.delete(k);
+  }
+  saveMeta(meta);
+  saveRevs(revs);
+  saveDirty(dirty);
+  if (changed.length) notifyData(changed);
+}
+
+function authExpired() {
+  setSyncState(
+    "expired",
+    "Your session expired. Sign in again — changes made meanwhile are kept on this device and sync after."
+  );
 }
 
 /**
@@ -151,23 +248,18 @@ function pendingPayload(): Record<string, { value: unknown; at: number }> | null
  *
  * iOS Safari frequently kills in-flight fetches (and often skips `beforeunload`
  * entirely) when you swipe away or switch apps, so a normal push can be lost.
- * sendBeacon is queued by the browser and delivered regardless.
+ * sendBeacon is queued by the browser and delivered regardless. Nothing is
+ * cleared here: a queued beacon is not a confirmed one, and the persisted dirty
+ * set makes the next open re-send whatever did not land.
  */
 function flushBeacon(): void {
-  if (typeof window === "undefined" || syncState === "off") return;
-  const data = pendingPayload();
-  if (!data) return;
-  const body = JSON.stringify({ data });
-
-  // NOTE: we deliberately do NOT clear `dirty` here.
-  //
-  // sendBeacon returning true only means the browser queued the request — it
-  // says nothing about the server accepting it, and a keepalive fetch can still
-  // fail. Clearing on a queued-but-unconfirmed send meant a 502 (or Redis being
-  // down) silently discarded the pending changes: the data survived only in
-  // localStorage, no longer marked as needing an upload. Leaving the keys dirty
-  // costs one redundant re-send next time and cannot lose anything. The server
-  // merge is timestamp-based, so re-sending is harmless.
+  if (typeof window === "undefined" || syncState === "off" || syncState === "expired") return;
+  const pending = pendingPayload();
+  if (!pending) return;
+  const body = JSON.stringify({ data: pending.data });
+  // Both sendBeacon and keepalive fetch refuse bodies over 64KB. The next open
+  // pushes it normally.
+  if (body.length > 60_000) return;
   try {
     const blob = new Blob([body], { type: "application/json" });
     if (navigator.sendBeacon?.("/api/state", blob)) return;
@@ -184,79 +276,136 @@ function flushBeacon(): void {
 
 /** Send locally-changed keys to the server. */
 async function push(): Promise<void> {
-  if (typeof window === "undefined" || syncState === "off" || dirty.size === 0) return;
-  const keys = Array.from(dirty);
-  const data = pendingPayload();
-  dirty.clear();
-  if (!data) return;
+  if (typeof window === "undefined" || syncState === "off" || syncState === "expired") return;
+  if (pushing) {
+    // One push at a time, or two could send the same patch against the same
+    // revision and both be merged as conflicts.
+    schedulePush();
+    return;
+  }
+  const pending = pendingPayload();
+  if (!pending) return;
 
   setSyncState("syncing");
-  try {
-    const res = await fetch("/api/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data }),
-    });
-    if (!res.ok) {
+  pushing = (async () => {
+    try {
+      const res = await fetch("/api/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: pending.data }),
+      });
+      if (res.status === 401) return authExpired();
       const d = await res.json().catch(() => ({}));
-      keys.forEach((k) => dirty.add(k)); // retry on the next write
-      setSyncState("error", d.error || `Sync failed (${res.status})`);
-      return;
+      if (!res.ok) {
+        setSyncState("error", d.error || `Sync failed (${res.status})`);
+        schedulePush(res.status === 409 ? 2000 : 15000);
+        return;
+      }
+      applyResults(d.results || {}, pending.snapshot);
+      setSyncState("idle");
+    } catch (err: any) {
+      setSyncState("error", err.message);
+      schedulePush(15000);
     }
-    setSyncState("idle");
-  } catch (err: any) {
-    keys.forEach((k) => dirty.add(k));
-    setSyncState("error", err.message);
+  })();
+  try {
+    await pushing;
+  } finally {
+    pushing = null;
   }
 }
 
 /**
- * Pull server state and merge. Returns true if anything local changed, so the
- * caller can refresh the UI.
+ * Pull what other devices changed. Asks for revisions first and downloads only
+ * the keys that moved, so a refresh on an unchanged account is one small read.
+ * Returns true if anything local changed.
  */
 async function pull(): Promise<boolean> {
   if (typeof window === "undefined") return false;
   setSyncState("syncing");
   try {
-    const res = await fetch("/api/state", { cache: "no-store" });
-    const payload = await res.json().catch(() => ({}));
-
-    if (!payload?.configured) {
+    const res = await fetch("/api/state?revs=1", { cache: "no-store" });
+    if (res.status === 401) {
+      authExpired();
+      return false;
+    }
+    const payload = await res.json().catch(() => null);
+    if (payload?.configured === false) {
       setSyncState("off");
       return false;
     }
-    if (!res.ok) {
-      setSyncState("error", payload.error || `Sync failed (${res.status})`);
+    if (!res.ok || !payload) {
+      setSyncState("error", payload?.error || `Sync failed (${res.status})`);
       return false;
     }
 
+    const serverRevs: Record<string, number> = payload.revs || {};
+    const revs = readRevs();
     const meta = readMeta();
-    const server: Record<string, { value: unknown; at: number }> = payload.data || {};
-    let changed = false;
+    const dirty = readDirty();
+    const changed: string[] = [];
 
-    for (const [key, entry] of Object.entries(server)) {
-      if (DEVICE_ONLY.has(key)) continue;
-      const localAt = meta[key] ?? -1;
-      if ((entry?.at ?? 0) > localAt) {
-        // Keep going if one key fails — a partially-applied merge that aborts
-        // mid-loop leaves later keys stale with no indication why.
-        if (safeSet(key, JSON.stringify(entry.value))) {
-          stamp(key, entry.at);
-          changed = true;
+    // Anything only this device has goes up — how an existing browser's data
+    // first reaches the database.
+    for (const k of Object.values(KEYS)) {
+      if (DEVICE_ONLY.has(k) || k in serverRevs) continue;
+      if (window.localStorage.getItem(k) !== null) {
+        dirty.add(k);
+        if (meta[k] === undefined) meta[k] = Date.now();
+      }
+    }
+
+    const needed = Object.keys(serverRevs).filter(
+      (k) => !DEVICE_ONLY.has(k) && serverRevs[k] > (revs[k] ?? 0)
+    );
+    if (needed.length) {
+      const res2 = await fetch(`/api/state?keys=${encodeURIComponent(needed.join(","))}`, {
+        cache: "no-store",
+      });
+      if (res2.status === 401) {
+        authExpired();
+        return false;
+      }
+      const p2 = await res2.json().catch(() => null);
+      if (!res2.ok || !p2) {
+        setSyncState("error", p2?.error || `Sync failed (${res2.status})`);
+        return false;
+      }
+
+      const rows = (p2.data || {}) as Record<string, { value: unknown; at: number; rev: number }>;
+      for (const [k, entry] of Object.entries(rows)) {
+        const localRev = revs[k] ?? 0;
+        // Both sides changed since this device last synced: the push merges it
+        // on the server and hands the result back.
+        if (dirty.has(k) && localRev > 0) continue;
+        // First sync since revisions existed, and this copy is the newer one:
+        // send it on top of the server's revision instead of taking the older.
+        if (
+          localRev === 0 &&
+          window.localStorage.getItem(k) !== null &&
+          (meta[k] ?? -1) > entry.at
+        ) {
+          dirty.add(k);
+          revs[k] = entry.rev;
+          continue;
+        }
+        if (safeSet(k, JSON.stringify(entry.value))) {
+          meta[k] = entry.at;
+          revs[k] = entry.rev;
+          dirty.delete(k);
+          saveBase(k, entry.value);
+          changed.push(k);
         }
       }
     }
 
-    // Anything this device has that the server doesn't (or has staler) goes up —
-    // this is what carries an existing browser's data into the database.
-    for (const [key, at] of Object.entries(readMeta())) {
-      if (DEVICE_ONLY.has(key)) continue;
-      if (!server[key] || (server[key].at ?? 0) < at) dirty.add(key);
-    }
-
+    saveMeta(meta);
+    saveRevs(revs);
+    saveDirty(dirty);
     setSyncState("idle");
+    if (changed.length) notifyData(changed);
     if (dirty.size) await push();
-    return changed;
+    return changed.length > 0;
   } catch (err: any) {
     setSyncState("error", err.message);
     return false;
@@ -282,22 +431,10 @@ export const sync = {
     listeners.add(fn);
     return () => listeners.delete(fn);
   },
-  /**
-   * First run on a device that already has local data: make sure every key is
-   * stamped so it gets uploaded rather than silently ignored.
-   */
-  stampExistingLocalData() {
-    if (typeof window === "undefined") return;
-    const meta = readMeta();
-    let touched = false;
-    for (const key of Object.values(KEYS)) {
-      if (DEVICE_ONLY.has(key)) continue;
-      if (window.localStorage.getItem(key) !== null && meta[key] === undefined) {
-        meta[key] = Date.now();
-        touched = true;
-      }
-    }
-    if (touched) window.localStorage.setItem(META_KEY, JSON.stringify(meta));
+  /** Called with the keys another device's data just replaced on this one. */
+  subscribeData(fn: (keys: string[]) => void) {
+    dataListeners.add(fn);
+    return () => dataListeners.delete(fn);
   },
 };
 
@@ -367,12 +504,26 @@ export const defaultStats: UsageStats = {
   practiceSolved: 0,
 };
 
+/**
+ * Fingerprints of everything dismissed, recomputed from the stored title and
+ * company rather than read from the stored `fp`. The fingerprint rule changed
+ * (it keeps the level now), and matching on the old strings would have brought
+ * back every job dismissed under the old rule.
+ */
+function dismissedFps(): Set<string> {
+  return new Set(
+    read<DismissedJob[]>(KEYS.dismissed, []).map((d) =>
+      d.title || d.company ? fingerprint({ title: d.title, company: d.company }) : d.fp
+    )
+  );
+}
+
 export const store = {
   getResume: () => read<ResumeData | null>(KEYS.resume, null),
   setResume: (r: ResumeData) => write(KEYS.resume, r),
 
   getProfile: () => read<Profile>(KEYS.profile, defaultProfile),
-  setProfile: (p: Profile) => write(KEYS.profile, p),
+  setProfile: (p: Profile): boolean => write(KEYS.profile, p),
 
   getValidation: () => read<ValidationResult | null>(KEYS.validation, null),
   setValidation: (v: ValidationResult) => write(KEYS.validation, v),
@@ -391,15 +542,12 @@ export const store = {
    * through it. */
   getDismissed: () => read<DismissedJob[]>(KEYS.dismissed, []),
 
-  isDismissed: (job: { title?: string; company?: string }) => {
-    const fp = fingerprint(job);
-    return read<DismissedJob[]>(KEYS.dismissed, []).some((d) => d.fp === fp);
-  },
+  isDismissed: (job: { title?: string; company?: string }) => dismissedFps().has(fingerprint(job)),
 
   dismissJob: (job: { title?: string; company?: string }) => {
     const fp = fingerprint(job);
     const list = read<DismissedJob[]>(KEYS.dismissed, []);
-    if (!list.some((d) => d.fp === fp)) {
+    if (!dismissedFps().has(fp)) {
       list.push({
         fp,
         title: job.title || "",
@@ -432,9 +580,7 @@ export const store = {
    * refreshes anything re-found, and drops what the user has dismissed.
    */
   addJobs: (incoming: Job[]) => {
-    const dismissed = new Set(
-      read<DismissedJob[]>(KEYS.dismissed, []).map((d) => d.fp)
-    );
+    const dismissed = dismissedFps();
     const merged = read<Job[]>(KEYS.jobs, []);
     const index = new Map(merged.map((j, i) => [fingerprint(j), i]));
     let added = 0;
@@ -457,9 +603,22 @@ export const store = {
          */
         const prev = merged[at];
         const keepPrevOrigin = sourceRank(prev.source) > sourceRank(job.source);
+        // A re-found job arrives with only a quick score; an AI analysis already
+        // saved for it is worth more. (Jobs saved before quick scoring existed
+        // have no flag and were all AI-analysed.)
+        const keepAnalysis = job.aiScored === false && prev.aiScored !== false;
+        const incoming: Job = keepAnalysis
+          ? {
+              ...prev,
+              description: job.description || prev.description,
+              postedAt: job.postedAt || prev.postedAt,
+              url: job.url,
+              source: job.source,
+            }
+          : job;
         merged[at] = {
           ...prev,
-          ...job,
+          ...incoming,
           foundAt: prev.foundAt ?? Date.now(),
           // The id is this app's own handle for the job: prepared applications
           // and the Auto-Pilot queue reference it, and re-keying it here would

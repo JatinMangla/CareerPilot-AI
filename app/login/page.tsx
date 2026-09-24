@@ -8,7 +8,7 @@ type Mode = "otp-send" | "otp-verify" | "password";
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("otp-send");
-  const [email, setEmail] = useState("jatinmangla123@gmail.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [sentTo, setSentTo] = useState("");
@@ -38,6 +38,8 @@ export default function LoginPage() {
       setMode("otp-verify");
       setCooldown(60);
       setInfo(`Code sent to ${data.sentTo} — check inbox & spam.`);
+    } catch {
+      setError("Couldn't reach the server — check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -60,6 +62,8 @@ export default function LoginPage() {
       }
       router.push("/");
       router.refresh();
+    } catch {
+      setError("Couldn't reach the server — check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -82,6 +86,8 @@ export default function LoginPage() {
       }
       router.push("/");
       router.refresh();
+    } catch {
+      setError("Couldn't reach the server — check your connection and try again.");
     } finally {
       setLoading(false);
     }

@@ -62,8 +62,37 @@ export function isBlockedListing(url: string | undefined, company?: string): boo
 
 /* ---------------- Location ---------------- */
 
+/**
+ * Word-bounded. Without \b, "Indianapolis" and "Indiana" counted as India and
+ * were ranked first. The city list covers the tier-2 hubs too — an onsite role
+ * in Kochi or Chandigarh used to be dropped as "not in India".
+ */
 export const INDIA_RE =
-  /india|bengaluru|bangalore|delhi|gurgaon|gurugram|noida|hyderabad|pune|mumbai|chennai|kolkata|ahmedabad|jaipur|indore|coimbatore/i;
+  /\b(india|bengaluru|bangalore|delhi|new delhi|ncr|gurgaon|gurugram|noida|greater noida|faridabad|ghaziabad|hyderabad|secunderabad|pune|mumbai|navi mumbai|thane|chennai|kolkata|ahmedabad|gandhinagar|jaipur|indore|coimbatore|kochi|cochin|trivandrum|thiruvananthapuram|chandigarh|mohali|panchkula|nagpur|vadodara|baroda|surat|mysuru|mysore|mangalore|mangaluru|bhubaneswar|visakhapatnam|vizag|lucknow|bhopal|madurai|nashik|goa|karnataka|maharashtra|telangana|tamil nadu|kerala|gujarat|haryana|rajasthan|west bengal|uttar pradesh|odisha)\b/i;
+
+/**
+ * Spellings of one place. Searching "Bangalore" used to drop every "Bengaluru"
+ * listing, and the reverse — the alias only existed for the "India" case.
+ */
+const CITY_ALIASES: string[][] = [
+  ["bengaluru", "bangalore"],
+  ["gurugram", "gurgaon"],
+  ["mumbai", "bombay"],
+  ["chennai", "madras"],
+  ["kolkata", "calcutta"],
+  ["kochi", "cochin"],
+  ["thiruvananthapuram", "trivandrum"],
+  ["mysuru", "mysore"],
+  ["mangaluru", "mangalore"],
+  ["vadodara", "baroda"],
+  ["visakhapatnam", "vizag"],
+  ["delhi", "new delhi", "ncr"],
+];
+
+function placeVariants(want: string): string[] {
+  const group = CITY_ALIASES.find((g) => g.some((name) => want.includes(name)));
+  return group ? Array.from(new Set([want, ...group])) : [want];
+}
 
 /**
  * Regions that a "remote" role is restricted to. A posting advertised as
@@ -71,7 +100,7 @@ export const INDIA_RE =
  * a bare "remote" match is not good enough.
  */
 const OTHER_REGION_RE =
-  /\b(us|usa|united states|nyc|new york|san francisco|seattle|austin|boston|chicago|denver|toronto|vancouver|canada|ireland|dublin|estonia|portugal|lisbon|poland|romania|spain|barcelona|madrid|france|paris|germany|berlin|munich|netherlands|amsterdam|uk|london|united kingdom|europe|emea|australia|sydney|melbourne|singapore|japan|tokyo|korea|china|brazil|mexico|argentina|colombia|israel|amer|latam|apac|nordics|sweden|stockholm|denmark|copenhagen|norway|switzerland|zurich|dubai|uae)\b/i;
+  /\b(us|usa|united states|nyc|new york|san francisco|seattle|austin|boston|chicago|denver|toronto|vancouver|canada|ireland|dublin|estonia|portugal|lisbon|poland|romania|spain|barcelona|madrid|france|paris|germany|berlin|munich|netherlands|amsterdam|uk|london|united kingdom|europe|emea|australia|sydney|melbourne|singapore|japan|tokyo|korea|china|brazil|mexico|argentina|colombia|israel|amer|americas|north america|latin america|latam|eu|cet|pst|pacific time|eastern time|apac|nordics|sweden|stockholm|denmark|copenhagen|norway|switzerland|zurich|dubai|uae)\b/i;
 
 const REMOTE_RE = /remote|anywhere|global|worldwide|distributed|work from home|wfh/i;
 
@@ -102,17 +131,23 @@ export function matchesLocation(location: string | undefined, wanted: string): b
   const l = (location || "").toLowerCase().replace(/\./g, "");
   if (!l.trim()) return false;
 
+  // A remote role is only reachable if it is not restricted to another region.
+  const openRemote = () =>
+    REMOTE_RE.test(l) &&
+    !OTHER_REGION_RE.test(l) &&
+    !US_STATE_TAIL_RE.test((location || "").trim());
+
   if (want.includes("india")) {
-    if (INDIA_RE.test(l)) return true;
-    if (US_STATE_TAIL_RE.test((location || "").trim())) return false;
-    return REMOTE_RE.test(l) && !OTHER_REGION_RE.test(l);
+    return INDIA_RE.test(l) || openRemote();
   }
-  return l.includes(want) || REMOTE_RE.test(l);
+  if (placeVariants(want).some((v) => l.includes(v))) return true;
+  // For an Indian city, "Remote - USA" is as unreachable as it is for "India".
+  return INDIA_RE.test(want) ? openRemote() : REMOTE_RE.test(l);
 }
 
 /** ISO country code for the aggregators that want one. */
 export function countryCode(wanted: string): string {
-  return /india/i.test(wanted || "") ? "in" : "";
+  return INDIA_RE.test(wanted || "") ? "in" : "";
 }
 
 function normalize(s: string | undefined): string {
@@ -128,17 +163,47 @@ function normalize(s: string | undefined): string {
  * Title and company only: the same posting is routinely listed as "Bengaluru,
  * India" on one feed and "Bangalore" or "Remote - India" on another, so
  * including location would split one job into three.
+ *
+ * The level stays in. It used to be stripped as feed noise, which made "Senior
+ * Software Engineer" and "Software Engineer I" the same job: dismissing the
+ * senior role permanently hid the junior one — the one worth applying to. Now
+ * only the spelling of the level is normalised ("Sr." = "Senior"), and req
+ * numbers are dropped.
  */
 export function fingerprint(job: {
   title?: string;
   company?: string;
 }): string {
   const title = normalize(job.title)
-    // Seniority and req-number noise differs between feeds for the same role.
-    .replace(/\b(sr|snr|senior|jr|junior|i{1,3}|iv|[0-9]{3,})\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return `${normalize(job.company)}::${title}`;
+    .split(" ")
+    .filter((w) => w && !/^[0-9]{3,}$/.test(w))
+    .map((w) => LEVEL_SYNONYMS[w] ?? w)
+    .join(" ");
+  return `${normalizeCompany(job.company)}::${title}`;
+}
+
+/** How feeds spell a level, mapped to one spelling. */
+const LEVEL_SYNONYMS: Record<string, string> = {
+  sr: "senior",
+  snr: "senior",
+  jr: "junior",
+  "1": "i",
+  "2": "ii",
+  "3": "iii",
+  "4": "iv",
+};
+
+/**
+ * Legal and filler suffixes, so "Razorpay" (its board) and "Razorpay Software
+ * Private Limited" (an aggregator) are recognised as one employer.
+ */
+const COMPANY_SUFFIX_RE =
+  /\b(private|pvt|limited|ltd|llp|llc|inc|incorporated|corp|corporation|co|company|gmbh|plc|technologies|technology|software|solutions|services|india)\b/g;
+
+function normalizeCompany(company: string | undefined): string {
+  const base = normalize(company);
+  const stripped = base.replace(COMPANY_SUFFIX_RE, "").replace(/\s+/g, " ").trim();
+  return stripped || base; // never reduce a name to nothing
 }
 
 /**

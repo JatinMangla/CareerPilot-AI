@@ -19,6 +19,11 @@ export interface Profile {
   locations: string;
   desiredRoles: string;
   portals: string[]; // which portals to target in auto-apply
+  /**
+   * Total professional experience. Drives which job levels count as a fit and how
+   * the AI judges seniority — the prompts used to assume "1-3 years" for everyone.
+   */
+  yearsExperience?: number;
   /* Used by the Auto-Pilot agent to fill application forms */
   phone?: string;
   linkedin?: string;
@@ -95,6 +100,14 @@ export interface Job {
   foundAt?: number;
   /** Which source filter produced it — "boards" | "yc" | "portals" | "ai". */
   via?: string;
+  /** When the employer posted it, where the source says. */
+  postedAt?: string;
+  /**
+   * false = only the quick, no-AI score so far (lib/jobScore.ts); matchScore
+   * and pros/cons then come from that. Absent on jobs saved before quick
+   * scoring existed, which were all AI-analysed.
+   */
+  aiScored?: boolean;
 }
 
 /**
@@ -174,6 +187,12 @@ export interface PreparedApplication {
   outcomeAt?: number;
   /** Which channel produced it, so conversion can be compared per source. */
   source?: string;
+  /** Last time it was opened in a tab — so "open next" moves on through the list. */
+  openedAt?: number;
+  /** The job's match score when it was sent, to compare results by fit. */
+  matchScore?: number;
+  /** updatedAt of the resume that was sent, to compare results by resume version. */
+  resumeVersion?: number;
 }
 
 /* ---------- Auto-Pilot (direct apply on company career sites) ---------- */
@@ -225,6 +244,12 @@ export interface QueuedApplication {
   finalResume: string;
   error?: string;
   at: number;
+  /* Outcome tracking, as on PreparedApplication — Auto-Pilot sends count too. */
+  outcome?: OutcomeStage;
+  outcomeAt?: number;
+  source?: string;
+  matchScore?: number;
+  resumeVersion?: number;
 }
 
 /* ---------- Inbox triage ---------- */

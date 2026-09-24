@@ -29,7 +29,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { classify, valueFor, matchPreparedAnswer, SKIP_INTENTS } from "./fields.mjs";
+import { classify, valueFor, matchPreparedAnswer, pickOption, SKIP_INTENTS } from "./fields.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const QUEUE_FILE = path.join(HERE, "apply-queue.json");
@@ -48,7 +48,32 @@ const BLOCKED_HOSTS = [
   "cutshort.",
   "hirist.",
   "wellfound.",
+  "timesjobs.",
+  "angel.co",
 ];
+
+/**
+ * Checked on the URL we were given AND on where the browser actually ended up:
+ * an Adzuna or Google for Jobs link is a redirect, and it can land on Naukri or
+ * Indeed. Only http(s) is opened at all.
+ */
+function isBlocked(url) {
+  const u = String(url || "").toLowerCase();
+  // file:// only for the bundled test fixture (see README) — never a real link.
+  if (u.startsWith("file:") && u.endsWith("/test-fixture.html")) return false;
+  if (!/^https?:\/\//.test(u)) return true;
+  let host = "";
+  try {
+    host = new URL(u).hostname;
+  } catch {
+    return true;
+  }
+  // Whole domain labels: "shine." must block shine.com, not moonshine.com.
+  return BLOCKED_HOSTS.some((h) => {
+    const name = h.replace(/\.$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|\\.)${name}(\\.|$)`).test(host);
+  });
+}
 
 const args = process.argv.slice(2);
 /** Open every application in its own tab and stop — no form filling at all. */
@@ -73,8 +98,13 @@ function log(...a) {
 /* Page inspection: tag every visible field and read its real label    */
 /* ------------------------------------------------------------------ */
 
-async function inspectFields(page) {
-  return page.evaluate(() => {
+/**
+ * Runs in one frame. Many employers embed the Greenhouse form in an iframe on
+ * their own careers page; reading the top frame only found nothing to fill
+ * (results.json showed MongoDB with filled: []).
+ */
+async function inspectFields(frame) {
+  return frame.evaluate(() => {
     const out = [];
     const els = Array.from(document.querySelectorAll("input, textarea, select"));
     let idx = 0;
@@ -114,8 +144,11 @@ async function inspectFields(page) {
         if (legend) label = legend.innerText || "";
       }
       if (!label) {
+        // Only when the wrapper holds this one field: in a row of inputs the
+        // first line of text is the FIRST field's label, and the second input
+        // used to inherit it ("First name" twice).
         const group = el.closest("div, fieldset, li, section, p");
-        if (group) {
+        if (group && group.querySelectorAll("input, textarea, select").length === 1) {
           const txt = (group.innerText || "")
             .trim()
             .split("\n")
@@ -174,11 +207,13 @@ async function hasCaptcha(page) {
 
 /** Some ATS pages show the job description first — open the real form. */
 async function openApplicationForm(page) {
-  const already = await page
-    .locator('input[type="file"], input[name*="resume" i], input[id*="first_name" i]')
-    .count()
-    .catch(() => 0);
-  if (already > 0) return;
+  for (const frame of page.frames()) {
+    const already = await frame
+      .locator('input[type="file"], input[name*="resume" i], input[id*="first_name" i]')
+      .count()
+      .catch(() => 0);
+    if (already > 0) return;
+  }
 
   const candidates = [
     'a:has-text("Apply for this job")',
@@ -190,8 +225,15 @@ async function openApplicationForm(page) {
     '#apply_button',
   ];
   for (const sel of candidates) {
-    const el = page.locator(sel).first();
-    if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) {
+    const all = page.locator(sel);
+    const n = await all.count().catch(() => 0);
+    for (let i = 0; i < n; i++) {
+      const el = all.nth(i);
+      if (!(await el.isVisible().catch(() => false))) continue;
+      // "Apply with LinkedIn" / "Apply via Indeed" lead to the portals this
+      // agent must never drive.
+      const label = ((await el.innerText().catch(() => "")) || "").toLowerCase();
+      if (/linkedin|indeed|naukri|glassdoor|seek/.test(label)) continue;
       await el.click({ timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(1800);
       return;
@@ -204,11 +246,26 @@ async function openApplicationForm(page) {
 /* ------------------------------------------------------------------ */
 
 async function fillForm(page, app, profile, resumePath, report) {
-  const fields = await inspectFields(page);
-  log(c.dim(`   found ${fields.length} fillable fields`));
+  for (const frame of page.frames()) {
+    const fields = await inspectFields(frame).catch(() => []);
+    if (!fields.length) continue;
+    log(c.dim(`   found ${fields.length} fillable fields${frame === page.mainFrame() ? "" : " (embedded form)"}`));
+    await fillFields(frame, fields, app, profile, resumePath, report);
+  }
+}
+
+async function fillFields(frame, fields, app, profile, resumePath, report) {
+  // Radios and checkboxes arrive one per option; a question is flagged once.
+  const flaggedChoices = new Set();
+  const flagChoice = (f) => {
+    const key = f.label || f.name;
+    if (flaggedChoices.has(key)) return;
+    flaggedChoices.add(key);
+    report.needsYou.push({ field: key || "choice", why: "unanswered choice" });
+  };
 
   for (const f of fields) {
-    const loc = page.locator(`[data-cp-idx="${f.idx}"]`).first();
+    const loc = frame.locator(`[data-cp-idx="${f.idx}"]`).first();
     if ((await loc.count()) === 0) continue;
 
     /* ---- resume / file uploads ---- */
@@ -230,7 +287,20 @@ async function fillForm(page, app, profile, resumePath, report) {
           report.needsYou.push({ field: f.label || "resume", why: "resume upload failed" });
           log(c.amber(`   ⚠ resume upload failed → "${f.label || f.name}"`));
         }
-      } else if (!isCover) {
+      } else if (isResume) {
+        report.needsYou.push({
+          field: f.label || "resume",
+          why: "no tailored resume PDF in the queue — attach your resume",
+        });
+        log(c.amber(`   ⚠ resume field, but the queue has no PDF: "${f.label || f.name}"`));
+      } else if (isCover) {
+        // No cover-letter file is generated; the text is in the kit. If the
+        // form requires a file, it has to be attached by hand.
+        report.needsYou.push({
+          field: f.label || f.name || "cover letter upload",
+          why: "cover letter file — attach it if the form requires one",
+        });
+      } else {
         // Some other attachment we can't identify — never guess with a file.
         report.needsYou.push({
           field: f.label || f.name || "file upload",
@@ -248,9 +318,10 @@ async function fillForm(page, app, profile, resumePath, report) {
       if (SKIP_INTENTS.has(intent)) continue; // voluntary demographic questions
       const prepared = matchPreparedAnswer(f.label || f.name, app.screeningAnswers);
       if (!prepared) {
-        if (f.required) {
-          report.needsYou.push({ field: f.label || f.name, why: "unanswered choice" });
-        }
+        // Flagged whether or not the DOM says "required" — the ATS forms mark
+        // required questions with an asterisk and validate in JavaScript, which is
+        // why the text-field path stopped trusting `required` long ago.
+        if (f.type === "radio" || f.required) flagChoice(f);
         continue;
       }
       const wantsYes = /^\s*(yes|true|i am|authorized|indian citizen)/i.test(prepared.answer);
@@ -275,20 +346,16 @@ async function fillForm(page, app, profile, resumePath, report) {
       const decided = valueFor(intent, f.label || f.name, app, profile);
       const prepared = matchPreparedAnswer(f.label || f.name, app.screeningAnswers);
       const want = (decided?.value || prepared?.answer || "").toLowerCase();
-      if (!want) continue;
-      const opts = f.options || [];
-      const match = opts.find(
-        (o) =>
-          o.text && o.text.toLowerCase() !== "" && want.includes(o.text.toLowerCase())
-      ) ||
-        f.options.find(
-          (o) => o.text && o.text.toLowerCase().length > 1 && want.startsWith(o.text.toLowerCase().slice(0, 3))
-        );
+      if (!want) {
+        report.needsYou.push({ field: f.label || f.name, why: "unanswered dropdown" });
+        continue;
+      }
+      const match = pickOption(f.options, want);
       if (match) {
         await loc.selectOption({ value: match.value }).catch(() => {});
         report.filled.push({ field: f.label, value: match.text });
         log(c.green(`   ✓ "${match.text}" → "${f.label.slice(0, 60)}"`));
-      } else if (f.required) {
+      } else {
         report.needsYou.push({ field: f.label, why: "no matching option" });
       }
       continue;
@@ -378,6 +445,11 @@ async function main() {
 
   fs.mkdirSync(SHOTS_DIR, { recursive: true });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "careerpilot-"));
+  // Tailored resumes are personal data; they used to pile up in the temp folder
+  // after every run.
+  const cleanup = () => fs.rmSync(tmpDir, { recursive: true, force: true });
+  process.on("exit", cleanup);
+  process.on("SIGINT", () => process.exit(0));
 
   log(c.bold(`\n🚀 CareerPilot Apply Assistant`));
   log(`   Applications: ${c.cyan(apps.length)}`);
@@ -406,10 +478,21 @@ async function main() {
    */
   if (OPEN_ONLY) {
     for (const app of apps) {
+      if (isBlocked(app.url)) {
+        log(c.amber(`  ⏭  ${app.title} @ ${app.company} — job portal or invalid link, open it yourself`));
+        results.push({ jobId: app.jobId, company: app.company, title: app.title, url: app.url, status: "skipped_portal" });
+        continue;
+      }
       const page = await context.newPage();
       await page.goto(app.url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch((err) => {
         log(c.red(`      ✖ ${app.company}: ${err.message}`));
       });
+      if (isBlocked(page.url())) {
+        log(c.amber(`  ⏭  ${app.company} redirected to a job portal — closed; open it yourself`));
+        await page.close().catch(() => {});
+        results.push({ jobId: app.jobId, company: app.company, title: app.title, url: app.url, status: "skipped_portal" });
+        continue;
+      }
       log(`  ${c.green("↗")} ${app.title} @ ${app.company}`);
       results.push({
         jobId: app.jobId,
@@ -450,7 +533,7 @@ async function main() {
     };
 
     // Hard safety gate — never automate social job portals.
-    if (BLOCKED_HOSTS.some((h) => (app.url || "").toLowerCase().includes(h))) {
+    if (isBlocked(app.url)) {
       report.status = "skipped_portal";
       report.note = "Job portal — automated submission violates their terms. Submit manually.";
       log(c.amber(`      ⏭  Skipped: portal site (submit manually from Auto-Apply)`));
@@ -463,12 +546,21 @@ async function main() {
       // write the tailored resume PDF to disk for upload
       let resumePath = "";
       if (app.resumePdfBase64) {
-        resumePath = path.join(tmpDir, app.resumeFileName || `resume_${i}.pdf`);
+        // basename: the name comes from the queue file and must not choose a directory.
+        resumePath = path.join(tmpDir, path.basename(app.resumeFileName || `resume_${i}.pdf`));
         fs.writeFileSync(resumePath, Buffer.from(app.resumePdfBase64, "base64"));
       }
 
       await page.goto(app.url, { waitUntil: "domcontentloaded", timeout: 60000 });
       await page.waitForTimeout(1500);
+      if (isBlocked(page.url())) {
+        report.status = "skipped_portal";
+        report.note = `Redirected to ${new URL(page.url()).hostname} — a job portal. Apply there yourself.`;
+        log(c.amber(`      ⏭  Redirected to a job portal — not filled`));
+        await page.close().catch(() => {});
+        results.push(report);
+        continue;
+      }
       await openApplicationForm(page);
       await page.waitForTimeout(800);
 

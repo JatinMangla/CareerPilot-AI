@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { streamTask } from "@/lib/aiClient";
+import { confirmMarkers, describeClaims, newClaims } from "@/lib/claimCheck";
 import type { ImprovementBrief, ResumeData } from "@/lib/types";
 
 /** How many individual fixes a brief carries. */
@@ -44,11 +45,18 @@ export default function ResumePage() {
   const [instructions, setInstructions] = useState("");
   const [brief, setBrief] = useState<ImprovementBrief | null>(null);
   const [aiOutput, setAiOutput] = useState("");
+  /** Only a stream that finished may replace the resume; a stopped or cut-off one may not. */
+  const [aiComplete, setAiComplete] = useState(false);
+  const [modelNote, setModelNote] = useState("");
+  const [claimNote, setClaimNote] = useState("");
   const [busy, setBusy] = useState<"" | "upload" | "improve" | "pdf">("");
   const [error, setError] = useState("");
   const [tpl, setTpl] = useState<"classic" | "modern">("classic");
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Leaving the page ends the stream, instead of letting it run on unseen and
+  // spend the day's free quota.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     const r = store.getResume();
@@ -81,6 +89,17 @@ export default function ResumePage() {
 
   async function downloadPdf() {
     if (!text.trim()) return setError("Nothing to download — add your resume first.");
+    // A "[confirm]" is a detail nobody has verified; it must not reach an
+    // employer as if it were fact.
+    const markers = confirmMarkers(text);
+    if (
+      markers &&
+      !window.confirm(
+        `Your resume still has ${markers} unverified [confirm] marker${markers === 1 ? "" : "s"}. ` +
+          `Each one is a detail the AI assumed. Export anyway?`
+      )
+    )
+      return;
     setError("");
     setBusy("pdf");
     try {
@@ -143,9 +162,11 @@ export default function ResumePage() {
     setError("");
     setBusy("improve");
     setAiOutput("");
+    setAiComplete(false);
+    setModelNote("");
     abortRef.current = new AbortController();
     try {
-      await streamTask(
+      const final = await streamTask(
         "improve_resume",
         {
           resume: text,
@@ -153,7 +174,20 @@ export default function ResumePage() {
           instructions: composeInstructions(brief, instructions),
         },
         (full) => setAiOutput(full),
-        abortRef.current.signal
+        {
+          signal: abortRef.current.signal,
+          onMeta: (m) =>
+            setModelNote(
+              m.fallback
+                ? `Written by ${m.model} because the stronger model was busy — worth regenerating later for a sharper version.`
+                : ""
+            ),
+        }
+      );
+      setAiOutput(final);
+      setAiComplete(true);
+      setClaimNote(
+        describeClaims(newClaims(text, final.split("=== WHAT I CHANGED ===")[0]))
       );
       store.bumpStat("improvements");
     } catch (err: any) {
@@ -165,7 +199,7 @@ export default function ResumePage() {
 
   function acceptImproved() {
     const improved = aiOutput.split("=== WHAT I CHANGED ===")[0].trim();
-    if (!improved) return;
+    if (!improved || !aiComplete) return;
     save(improved, "AI improvement");
     setAiOutput("");
     // The findings have been applied — a stale brief would just re-apply them.
@@ -394,7 +428,19 @@ export default function ResumePage() {
               </div>
               {busy !== "improve" && (
                 <div className="flex gap-2 flex-wrap items-center">
-                  <button className="btn-primary" onClick={acceptImproved}>
+                  {!aiComplete && (
+                    <p className="w-full text-xs text-amberx-400">
+                      This version is incomplete (stopped or cut off), so it can&apos;t replace your resume. Run it again.
+                    </p>
+                  )}
+                  {aiComplete && modelNote && <p className="w-full text-xs text-ink-400">{modelNote}</p>}
+                  {aiComplete && claimNote && (
+                    <p className="w-full text-xs text-amberx-400">
+                      Not in your current resume: {claimNote}. Confirm each is true before accepting —
+                      an invented metric is the first thing an interviewer asks about.
+                    </p>
+                  )}
+                  <button className="btn-primary" onClick={acceptImproved} disabled={!aiComplete}>
                     ✓ Accept — replace my resume
                   </button>
                   <button className="btn-secondary" onClick={() => setAiOutput("")}>

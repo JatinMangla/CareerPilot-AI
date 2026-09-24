@@ -1,3 +1,5 @@
+import { requireSession } from "@/lib/session";
+
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -18,6 +20,8 @@ function usernameFrom(input: string): string {
 }
 
 export async function POST(req: Request) {
+  const denied = await requireSession();
+  if (denied) return denied;
   const { username: raw } = await req.json().catch(() => ({ username: "" }));
   const username = usernameFrom(raw);
 

@@ -47,6 +47,7 @@ export default function ValidatePage() {
     try {
       const data = await jsonTask<Omit<ValidationResult, "at">>("validate_resume", {
         resume: resume.text,
+        profile: store.getProfile(),
       });
       const full: ValidationResult = { ...data, at: Date.now() };
       store.setValidation(full);

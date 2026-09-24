@@ -126,6 +126,17 @@ async function loadTasks() {
     .replace(/:\s*Record<[^>]+>\s*=/g, " =")
     .replace(/\(\s*input:\s*Record<[^>]+>\s*\)/g, "(input)")
     .replace(/properties:\s*Record<[^>]+>/g, "properties")
+    // Whole parameter lists of top-level function declarations:
+    // `function fence(tag: string, content: unknown)`. Generics are removed first,
+    // so the comma inside `Record<string, any>` is not taken for a separator.
+    .replace(/^((?:export\s+)?function\s+\w+\s*)\(([^)]*)\)/gm, (_, head, params) => {
+      let p = params;
+      while (/<[^<>]*>/.test(p)) p = p.replace(/<[^<>]*>/g, "");
+      return `${head}(${p
+        .split(",")
+        .map((s) => s.replace(/\??\s*:[\s\S]*$/, ""))
+        .join(",")})`;
+    })
     // Parameter annotations, optional or not: `(profile?: Partial<Profile>)`.
     .replace(/([A-Za-z_$][\w$]*)\?\s*:\s*[\w.<>[\]|\s]+?(?=[,)])/g, "$1")
     // Return type annotations: `): string {`.

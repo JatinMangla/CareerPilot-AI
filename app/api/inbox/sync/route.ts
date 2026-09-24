@@ -1,5 +1,6 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
+import { requireSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -26,6 +27,8 @@ const SETUP_HELP =
   "(2-Step Verification must be on), then add GMAIL_APP_PASSWORD in your Vercel project settings.";
 
 export async function POST(req: Request) {
+  const denied = await requireSession();
+  if (denied) return denied;
   const user = (process.env.GMAIL_USER || process.env.AUTH_EMAIL || "").trim();
   const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s+/g, "");
   if (!user || !pass) {
@@ -107,9 +110,13 @@ export async function POST(req: Request) {
     if (batch.length) highestUid = batch[batch.length - 1];
 
     if (batch.length) {
+      // Capped: the full source includes attachments, and 80 messages with PDFs
+      // attached is tens of megabytes to pull inside a 60-second function. The
+      // text part comes first in the MIME tree, so the cap does not cost the
+      // body; mailparser reads a truncated message fine.
       for await (const msg of client.fetch(
         batch,
-        { uid: true, source: true, envelope: true },
+        { uid: true, source: { maxLength: 200_000 }, envelope: true },
         { uid: true }
       )) {
         try {

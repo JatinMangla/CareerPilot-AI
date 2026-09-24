@@ -5,6 +5,7 @@ import {
   isBlockedListing,
   matchesLocation,
 } from "@/lib/jobFilters";
+import { requireSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -40,6 +41,7 @@ interface Listing {
   url: string;
   description: string;
   source: string;
+  postedAt?: string;
 }
 
 /** Hard ceiling on what one search may return, whatever the client asks for. */
@@ -47,6 +49,17 @@ const MAX_LIMIT = 150;
 
 /** Aggregator pages to walk. Each is one API call against a metered quota. */
 const AGGREGATOR_PAGES = 3;
+
+/** One aggregator request may not hold the search up longer than this. */
+const AGGREGATOR_TIMEOUT_MS = 15_000;
+
+/**
+ * Board fetching stops starting new requests this long into the search, leaving
+ * room for the shortlist's descriptions inside the 60s function limit. 121
+ * boards at 20 at a time and 9s each could otherwise run to 63s and return
+ * nothing at all.
+ */
+const BOARD_DEADLINE_MS = 32_000;
 
 /**
  * Drops what should never reach the user: paywalled republishers, and jobs in
@@ -97,7 +110,11 @@ async function fromJSearch(queries: string[], loc: string): Promise<Listing[]> {
           `?query=${encodeURIComponent(`${q} jobs in ${loc}`)}` +
           `&page=1&num_pages=${AGGREGATOR_PAGES}&date_posted=month` +
           (cc ? `&country=${cc}` : "");
-        const res = await fetch(url, { headers: { "X-API-Key": key }, cache: "no-store" });
+        const res = await fetch(url, {
+          headers: { "X-API-Key": key },
+          cache: "no-store",
+          signal: AbortSignal.timeout(AGGREGATOR_TIMEOUT_MS),
+        });
         if (!res.ok) return;
         const data = await res.json();
         for (const j of (data?.data?.jobs || data?.data || []) as any[]) {
@@ -120,6 +137,7 @@ async function fromJSearch(queries: string[], loc: string): Promise<Listing[]> {
             url: j.job_apply_link || j.job_google_link || "",
             description: String(j.job_description || "").slice(0, 1200),
             source: "jsearch",
+            postedAt: j.job_posted_at_datetime_utc || undefined,
           });
         }
       } catch {
@@ -151,7 +169,7 @@ async function fromAdzuna(queries: string[], loc: string): Promise<Listing[]> {
           if (loc && loc.toLowerCase() !== "india") params.set("where", loc);
           const res = await fetch(
             `https://api.adzuna.com/v1/api/jobs/in/search/${page}?${params.toString()}`,
-            { cache: "no-store" }
+            { cache: "no-store", signal: AbortSignal.timeout(AGGREGATOR_TIMEOUT_MS) }
           );
           if (!res.ok) return;
           const data = await res.json();
@@ -170,6 +188,7 @@ async function fromAdzuna(queries: string[], loc: string): Promise<Listing[]> {
               url: r.redirect_url,
               description: String(r.description || "").slice(0, 1200),
               source: "adzuna",
+              postedAt: r.created || undefined,
             });
           }
         } catch {
@@ -182,17 +201,21 @@ async function fromAdzuna(queries: string[], loc: string): Promise<Listing[]> {
 }
 
 export async function POST(req: Request) {
+  const denied = await requireSession();
+  if (denied) return denied;
   const body = await req.json().catch(() => ({}) as any);
-  const q = String(body.query || "react frontend developer").trim();
-  const loc = String(body.location || "India").trim();
+  const q = String(body.query || "react frontend developer").trim().slice(0, 120);
+  const loc = String(body.location || "India").trim().slice(0, 80);
   const focus = String(body.focus || "boards");
-  const limit = Math.min(Number(body.limit) || 60, MAX_LIMIT);
+  const limit = Math.max(1, Math.min(Math.floor(Number(body.limit)) || 60, MAX_LIMIT));
+  const years = Number(body.yearsExperience);
+  const started = Date.now();
 
   // The client sends role variants built from the profile ("react developer",
   // "ui engineer", …). Aggregators return very different results per phrasing,
   // so searching several is the cheapest way to widen the net.
   const extra: string[] = Array.isArray(body.queries)
-    ? body.queries.map((s: unknown) => String(s).trim()).filter(Boolean)
+    ? body.queries.map((s: unknown) => String(s).trim().slice(0, 120)).filter(Boolean)
     : [];
   const queries = Array.from(new Set([q, ...extra])).slice(0, 4);
 
@@ -203,6 +226,9 @@ export async function POST(req: Request) {
     wantsBoards
       ? searchCompanyBoards({
           query: q,
+          variants: queries,
+          years: Number.isFinite(years) ? years : undefined,
+          deadline: started + BOARD_DEADLINE_MS,
           location: loc,
           ycOnly: focus === "yc",
           // On "all", boards would otherwise fill the entire result budget
@@ -223,10 +249,13 @@ export async function POST(req: Request) {
     location: j.location,
     salary: "",
     url: j.url,
-    // The board APIs do not return the body cheaply, but the team name is real
-    // context and measurably improves the AI's match scoring.
-    description: j.department ? `Team: ${j.department}` : "",
+    // Lever and Ashby send the posting with the list; Greenhouse descriptions are
+    // fetched for the shortlist. Scoring without them was scoring the title.
+    description: [j.department ? `Team: ${j.department}` : "", j.description || ""]
+      .filter(Boolean)
+      .join("\n"),
     source: boardSource,
+    postedAt: j.postedAt,
   }));
 
   // Boards first: dedupe keeps the first copy, and a direct ATS link beats an

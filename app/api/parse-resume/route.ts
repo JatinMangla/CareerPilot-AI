@@ -1,7 +1,11 @@
+import { requireSession } from "@/lib/session";
+
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
+  const denied = await requireSession();
+  if (denied) return denied;
   const form = await req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {

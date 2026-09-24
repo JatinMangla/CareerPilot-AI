@@ -10,6 +10,7 @@
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join, relative, dirname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -43,17 +44,44 @@ const isSkippedFile = (name) =>
 /** Forward slashes everywhere, so output is identical on Windows and on CI. */
 export const posix = (p) => p.split(sep).join("/");
 
-/** Every tracked file, repo-relative, sorted. */
-export function walk(dir = ROOT, acc = []) {
+function walkFs(dir, acc) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
-      walk(join(dir, entry.name), acc);
+      walkFs(join(dir, entry.name), acc);
     } else if (!isSkippedFile(entry.name)) {
       acc.push(posix(relative(ROOT, join(dir, entry.name))));
     }
   }
-  return acc.sort();
+  return acc;
+}
+
+/**
+ * Files git would commit: tracked, plus untracked-but-not-ignored.
+ *
+ * Walking the disk alone listed gitignored personal data — agent/screenshots/
+ * named every company applied to — in the committed repo map. Honouring
+ * .gitignore is the only rule that stays right as new ignores are added.
+ * Returns null outside a git checkout, and the walk then stands on its own.
+ */
+function gitVisible() {
+  try {
+    const out = execFileSync(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    );
+    return new Set(out.split("\0").filter(Boolean));
+  } catch {
+    return null;
+  }
+}
+
+/** Every file git would commit, repo-relative, sorted. */
+export function walk(dir = ROOT) {
+  const all = walkFs(dir, []);
+  const visible = gitVisible();
+  return (visible ? all.filter((f) => visible.has(f)) : all).sort();
 }
 
 const SOURCE_RE = /\.(ts|tsx|mjs|js|jsx)$/;

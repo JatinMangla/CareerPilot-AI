@@ -28,8 +28,20 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
+  async function logout(everywhere = false) {
+    if (everywhere && !confirm("Sign out on every device, including this one?")) return;
+    try {
+      const res = await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ everywhere }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.error) alert(data.error);
+    } catch {
+      // Offline: the server could not revoke anything, but leaving this page
+      // is still the right outcome — the next request will need a login.
+    }
     router.push("/login");
     router.refresh();
   }
@@ -81,8 +93,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
         <div className="shrink-0 px-4 pt-3 pb-4 border-t border-ink-800 space-y-1 bg-ink-900/60">
           <SyncBadge />
-          <button onClick={logout} className="btn-secondary w-full text-xs">
+          <button onClick={() => logout()} className="btn-secondary w-full text-xs">
             Sign out
+          </button>
+          <button
+            onClick={() => logout(true)}
+            className="w-full text-[11px] text-ink-400 hover:text-ink-100 py-1"
+          >
+            Sign out everywhere
           </button>
         </div>
       </aside>
@@ -103,8 +121,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <div className="md:hidden fixed inset-x-0 top-[53px] bottom-0 z-40 flex flex-col bg-ink-900/95 backdrop-blur border-b border-ink-800">
           <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-4">{nav}</div>
           <div className="shrink-0 p-4 pt-3 border-t border-ink-800">
-            <button onClick={logout} className="btn-secondary w-full text-xs">
+            <button onClick={() => logout()} className="btn-secondary w-full text-xs">
               Sign out
+            </button>
+            <button
+              onClick={() => logout(true)}
+              className="w-full text-[11px] text-ink-400 hover:text-ink-100 py-1"
+            >
+              Sign out everywhere
             </button>
           </div>
         </div>

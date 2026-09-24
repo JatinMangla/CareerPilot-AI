@@ -1,5 +1,7 @@
 "use client";
 
+import { safeHref } from "./safeUrl";
+
 /**
  * Opens a batch of application pages, one browser tab each.
  *
@@ -27,7 +29,8 @@ export const TAB_BATCH = 10;
 export function openTabs(urls: string[]): OpenResult {
   let opened = 0;
   let blocked = 0;
-  for (const url of urls) {
+  for (const raw of urls) {
+    const url = safeHref(raw);
     if (!url) continue;
     const win = window.open(url, "_blank", "noopener,noreferrer");
     if (win) opened++;

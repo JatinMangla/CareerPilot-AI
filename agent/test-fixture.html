@@ -59,8 +59,39 @@
         <label><input type="radio" name="gender" value="d" /> Decline to self-identify</label>
       </fieldset>
 
+      <!-- Traps: each of these was once answered wrongly. The expected result is
+           that the agent leaves every one blank and lists it under "needs you". -->
+      <p><label for="rate">Rate your proficiency in React (1-5)</label><br />
+        <input id="rate" /></p>
+      <p><label for="mobiledev">Mobile development experience?</label><br />
+        <input id="mobiledev" /></p>
+      <p><label for="refemail">Referrer's email</label><br />
+        <input id="refemail" /></p>
+      <p><label for="project">Tell us about a project you built</label><br />
+        <textarea id="project"></textarea></p>
+      <p><label for="curctc">Current CTC</label><br />
+        <input id="curctc" /></p>
+      <fieldset><legend>Are you authorized to work in the US?</legend>
+        <label><input type="radio" name="usauth" value="y" /> Yes</label>
+        <label><input type="radio" name="usauth" value="n" /> No</label>
+      </fieldset>
+      <p><label for="state">State of residence</label><br />
+        <select id="state">
+          <option value="">Select…</option>
+          <option value="IN-US">Indiana</option>
+          <option value="IL">Illinois</option>
+        </select></p>
+
       <p><button type="submit">Submit Application</button></p>
     </form>
+
+    <!-- How many employers embed Greenhouse: the form lives in an iframe. The
+         agent must find and fill the "Full name" field inside it. -->
+    <iframe
+      title="Embedded application"
+      style="width: 100%; height: 120px; border: 1px solid #ccc"
+      srcdoc="<form><p><label for='pref'>Full name</label><br /><input id='pref' /></p></form>"
+    ></iframe>
     <script>
       document.getElementById('app').addEventListener('submit', (e) => {
         e.preventDefault();

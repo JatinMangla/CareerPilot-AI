@@ -1,10 +1,14 @@
 "use client";
 
 /**
- * Free-tier usage guard. Counts calls client-side (single-user app) so you get
- * warned BEFORE crossing a free limit, and hard-stopped at the limit.
- * None of these services can bill you unless you attach a card / enable billing —
- * this guard is about avoiding hard stops and keeping usage comfortably free.
+ * Free-tier usage display. Warns as you approach a free limit.
+ *
+ * It no longer hard-stops. The pause counted one click per device, so it could
+ * not see fallback retries, other devices, or the fact that each model in a
+ * chain has its own daily allowance — it blocked calls Gemini would have served.
+ * Gemini's own 429 is the real limit, and lib/gemini.ts already turns it into a
+ * clear message. The Gemini count now comes from the server (every upstream
+ * request, all devices) whenever Redis is connected.
  */
 
 export interface QuotaInfo {
@@ -21,11 +25,12 @@ const LIMITS: Record<QuotaInfo["key"], { label: string; limit: number; period: "
   jobsApi: { label: "Job search API calls (free credits)", limit: 200, period: "month", warnAt: 0.75 },
 };
 
+/** Free-tier quotas reset at midnight Pacific, so the day is counted in Pacific time. */
 function periodKey(period: "day" | "month"): string {
-  const d = new Date();
-  return period === "day"
-    ? `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
-    : `${d.getFullYear()}-${d.getMonth() + 1}`;
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(
+    new Date()
+  );
+  return period === "day" ? day : day.slice(0, 7);
 }
 
 function read(key: string): { period: string; count: number } {
@@ -37,13 +42,26 @@ function read(key: string): { period: string; count: number } {
   }
 }
 
+function save(key: string, value: { period: string; count: number }) {
+  try {
+    window.localStorage.setItem(`cp_quota_${key}`, JSON.stringify(value));
+  } catch {
+    /* a full disk must not break the call this is counting */
+  }
+}
+
 export const quota = {
+  /** This device's own count — used only when the server cannot count. */
   bump(key: QuotaInfo["key"], by = 1) {
     const def = LIMITS[key];
     const pk = periodKey(def.period);
     const cur = read(key);
-    const count = cur.period === pk ? cur.count + by : by;
-    window.localStorage.setItem(`cp_quota_${key}`, JSON.stringify({ period: pk, count }));
+    save(key, { period: pk, count: cur.period === pk ? cur.count + by : by });
+  },
+
+  /** The authoritative count, as reported by the server. */
+  report(key: QuotaInfo["key"], used: number) {
+    save(key, { period: periodKey(LIMITS[key].period), count: used });
   },
 
   get(key: QuotaInfo["key"]): QuotaInfo {
@@ -62,16 +80,5 @@ export const quota = {
 
   all(): QuotaInfo[] {
     return (Object.keys(LIMITS) as QuotaInfo["key"][]).map((k) => quota.get(k));
-  },
-
-  /** Throws a friendly error if the free limit is already reached. */
-  guard(key: QuotaInfo["key"]) {
-    const q = quota.get(key);
-    if (q.used >= q.limit) {
-      throw new Error(
-        `Free limit reached: ${q.label} — ${q.used}/${q.limit} this ${q.period}. ` +
-          `It resets next ${q.period === "day" ? "day" : "month"}; no bill will be generated, requests are simply paused.`
-      );
-    }
   },
 };

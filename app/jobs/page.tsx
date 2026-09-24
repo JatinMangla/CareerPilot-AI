@@ -8,9 +8,11 @@ import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { quota } from "@/lib/quota";
 import { isVerifiedSource } from "@/lib/ats";
 import { isBlockedListing } from "@/lib/jobFilters";
+import { safeHref } from "@/lib/safeUrl";
 import { roleSuggestions, searchVariants } from "@/lib/roleSuggestions";
 import { Pager, usePaged } from "@/components/Pager";
-import type { Job } from "@/lib/types";
+import { quickScore } from "@/lib/jobScore";
+import type { Job, Profile } from "@/lib/types";
 
 type Focus = "boards" | "yc" | "portals" | "all";
 
@@ -50,8 +52,116 @@ const FILTERS: { k: Focus; label: string; hint: string }[] = [
   { k: "all", label: "📋 Everything", hint: "Every job found so far, from all sources." },
 ];
 
-/** Listings analyzed per AI call. Small batches keep each answer within budget. */
-const BATCH = 8;
+/**
+ * Listings per AI call. The model now returns only its judgement, keyed by id —
+ * it used to echo every listing back — so a batch of 20 fits where 8 used to.
+ */
+const BATCH = 20;
+
+/**
+ * How many of the best quick-scored listings the AI analyses on its own. The
+ * rest keep their quick score and are one click away ("Analyze more"), so a big
+ * search costs 2 calls up front instead of ~19, and nothing is silently dropped.
+ */
+const AUTO_ANALYZE = 40;
+
+interface AnalysisRow {
+  id: string;
+  salary: string;
+  matchScore: number;
+  pros: string[];
+  cons: string[];
+  jobSecurity: string;
+  futureOutlook: string;
+  recommendation: string;
+}
+
+/** A listing with its instant, no-AI score (lib/jobScore.ts). */
+function toQuickJob(l: any, profile: Profile): Job {
+  const q = quickScore(l, profile);
+  return {
+    id: l.id,
+    title: l.title,
+    company: l.company,
+    location: l.location || "",
+    salary: l.salary || "",
+    url: l.url,
+    source: l.source,
+    description: l.description || "",
+    postedAt: l.postedAt,
+    matchScore: q.score,
+    pros: q.pros,
+    cons: q.cons,
+    jobSecurity: "",
+    futureOutlook: "",
+    recommendation: "Quick score from skills and experience overlap — not analysed by AI yet.",
+    aiScored: false,
+  };
+}
+
+/**
+ * AI analysis for some jobs. Facts (id, title, company, URL, source) always come
+ * from the listing, never from the model: a rewritten URL would send an
+ * application to a link that does not exist, and a rewritten source would let an
+ * AI guess pass isVerifiedSource. An answer whose id matches nothing in its batch
+ * is dropped — the old positional fallback could pin one job's analysis onto
+ * another job's link.
+ */
+async function analyzeJobs(
+  targets: Job[],
+  resumeText: string,
+  profile: Profile,
+  onProgress: (done: number, total: number) => void
+): Promise<{ analyzed: Job[]; failed: number; batches: number; firstError: string }> {
+  const batches: Job[][] = [];
+  for (let i = 0; i < targets.length; i += BATCH) batches.push(targets.slice(i, i + BATCH));
+
+  const outcomes = await mapPool(
+    batches,
+    AI_CONCURRENCY,
+    (batch) =>
+      jsonTask<{ jobs: AnalysisRow[] }>("analyze_jobs", {
+        jobs: batch.map((j) => ({
+          id: j.id,
+          title: j.title,
+          company: j.company,
+          location: j.location,
+          salary: j.salary,
+          postedAt: j.postedAt,
+          description: j.description,
+        })),
+        resume: resumeText,
+        profile,
+      }),
+    onProgress
+  );
+
+  const analyzed: Job[] = [];
+  for (const o of outcomes) {
+    for (const row of o.value?.jobs || []) {
+      const src = o.item.find((b) => b.id === row.id);
+      if (!src) continue;
+      analyzed.push({
+        ...src,
+        salary: src.salary || row.salary || "",
+        matchScore: row.matchScore,
+        pros: row.pros || [],
+        cons: row.cons || [],
+        jobSecurity: row.jobSecurity || "",
+        futureOutlook: row.futureOutlook || "",
+        recommendation: row.recommendation || "",
+        aiScored: true,
+      });
+    }
+  }
+  const failedOutcomes = outcomes.filter((o) => o.error);
+  return {
+    analyzed,
+    failed: failedOutcomes.length,
+    batches: batches.length,
+    firstError: failedOutcomes[0]?.error?.message || "",
+  };
+}
 
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -66,6 +176,7 @@ export default function JobsPage() {
   const [hasResume, setHasResume] = useState(true);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [dismissedCount, setDismissedCount] = useState(0);
+  const [offerAiLeads, setOfferAiLeads] = useState(false);
 
   useEffect(() => {
     const profile = store.getProfile();
@@ -82,7 +193,13 @@ export default function JobsPage() {
         .filter((j) => BUCKETS[focus](j.source))
         .filter((j) => !isBlockedListing(j.url, j.company))
         .slice()
-        .sort((a, b) => b.matchScore - a.matchScore),
+        // AI-analysed first — the quick score is a different, rougher scale —
+        // then by score within each group.
+        .sort(
+          (a, b) =>
+            Number(b.aiScored !== false) - Number(a.aiScored !== false) ||
+            b.matchScore - a.matchScore
+        ),
     [jobs, focus]
   );
 
@@ -94,143 +211,157 @@ export default function JobsPage() {
     return c;
   }, [jobs]);
 
+  const awaitingAnalysis = useMemo(
+    () => visible.filter((j) => j.aiScored === false && isVerifiedSource(j.source)),
+    [visible]
+  );
+
   async function findJobs() {
     const resume = store.getResume();
     if (!resume?.text) return setError("Add your resume first — matching needs it.");
     setError("");
     setNotice("");
+    setOfferAiLeads(false);
     setBusy(true);
     try {
       const profile = store.getProfile();
-      const apiFocus = focus === "all" ? "all" : focus;
       setStatus(
         focus === "portals"
           ? "Searching job portals (Google for Jobs + Adzuna)…"
           : "Reading company career boards (Greenhouse / Lever / Ashby)…"
       );
 
-      const live = await fetch("/api/jobs", {
+      const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query,
           location,
-          focus: apiFocus,
+          focus,
           limit: depth,
+          yearsExperience: profile.yearsExperience,
           // Extra phrasings from the profile — feeds are literal, so
           // "React Developer" and "Frontend Engineer" find different jobs.
           queries: searchVariants(query, profile),
         }),
-      }).then((r) => r.json());
+      });
+      const live = await res.json().catch(() => ({}));
 
-      let analyzed: Job[] = [];
-
-      if (live.available && live.listings?.length) {
-        // Company boards are free public JSON — only metered aggregators count.
-        if (live.counts?.jsearch || live.counts?.adzuna) quota.bump("jobsApi");
-
-        const listings: any[] = live.listings;
-        const batches: any[][] = [];
-        for (let i = 0; i < listings.length; i += BATCH) {
-          batches.push(listings.slice(i, i + BATCH));
-        }
-
-        setStatus(
-          `Found ${listings.length} live listings — scoring them against your resume ` +
-            `(${batches.length} batch${batches.length === 1 ? "" : "es"})…`
-        );
-
-        /*
-         * One call for the whole search would have to fit every listing AND
-         * every analysis inside a single response budget, which is what capped
-         * the old flow at ten jobs. Batching lets the search return as many
-         * jobs as the sources have, and the batches overlap so it is not
-         * proportionally slower. A failed batch loses eight jobs, not all of them.
-         */
-        const outcomes = await mapPool(
-          batches,
-          AI_CONCURRENCY,
-          (batch) =>
-            jsonTask<{ jobs: Job[] }>("analyze_jobs", {
-              jobs: batch,
-              resume: resume.text,
-              profile,
-            }),
-          (done, total) =>
-            setStatus(`Scoring ${listings.length} listings against your resume… ${done}/${total} batches`)
-        );
-
-        /*
-         * Trust the model for the analysis, never for the facts. It is asked to
-         * echo id/url/source back unchanged, and mostly does — but a single
-         * rewritten URL here becomes an application sent to a link that does not
-         * exist, and a rewritten source would let an AI guess pass isVerifiedSource.
-         * Re-stamp them from the listing the batch was built from.
-         */
-        for (const o of outcomes) {
-          if (!o.value?.jobs) continue;
-          const batch = o.item;
-          o.value.jobs.forEach((scored, i) => {
-            const src = batch.find((b: any) => b.id === scored.id) || batch[i];
-            if (!src) return;
-            analyzed.push({
-              ...scored,
-              id: src.id,
-              title: src.title,
-              company: src.company,
-              location: src.location || scored.location,
-              url: src.url,
-              source: src.source,
-              description: scored.description || src.description,
-            });
-          });
-        }
-
-        const failed = outcomes.filter((o) => o.error);
-        if (failed.length) {
-          setNotice(
-            `${failed.length} of ${batches.length} batches could not be scored ` +
-              `(${failed[0].error!.message}). The rest are below — run the search again for those.`
-          );
-        }
-      } else {
-        setStatus("No live listings matched — asking the AI to research openings instead…");
-        const result = await jsonTask<{ jobs: Job[] }>("find_jobs", {
-          resume: resume.text,
-          profile,
-          count: 12,
-          focus: focus === "yc" ? "yc" : "all",
-        });
-        // Force the source: isVerifiedSource is what stops an invented listing
-        // reaching the apply pipeline, so it must not depend on the model
-        // remembering to label its own guesses.
-        analyzed = (result.jobs || []).map((j) => ({ ...j, source: "ai-researched" }));
+      // A failed search is reported as one. It used to fall through to the AI
+      // "research" task, which spent quota inventing leads to cover an error.
+      if (!res.ok) {
+        setError(live.error || `Job search failed (${res.status}). Try again in a moment.`);
+        return;
       }
-
-      if (!analyzed.length) {
+      if (!live.available || !live.listings?.length) {
         setError(
-          "No matches came back. Try a broader role (e.g. \"software engineer\"), " +
+          "No live listings matched. Try a broader role (e.g. \"software engineer\"), " +
             "a wider location (\"India\" or \"Remote\"), or the Everything filter."
         );
+        setOfferAiLeads(true);
         return;
       }
 
-      // AI leads belong to no source filter, so land the user on the one that
-      // shows them rather than on an empty "Company boards" list.
-      if (analyzed[0]?.source === "ai-researched") setFocus("all");
+      // Company boards are free public JSON — only metered aggregators count.
+      if (live.counts?.jsearch || live.counts?.adzuna) quota.bump("jobsApi");
 
-      const { jobs: merged, added } = store.addJobs(analyzed);
-      store.bumpStat("jobsAnalyzed", analyzed.length);
+      const quick = (live.listings as any[])
+        .map((l) => toQuickJob(l, profile))
+        .sort((a, b) => b.matchScore - a.matchScore);
+      const top = quick.slice(0, AUTO_ANALYZE);
+      setStatus(
+        `Found ${quick.length} live listings — AI is analysing the best ${top.length} against your resume…`
+      );
+
+      const result = await analyzeJobs(top, resume.text, profile, (done, total) =>
+        setStatus(`Analysing the best ${top.length} of ${quick.length} listings… ${done}/${total} batches`)
+      );
+      const byId = new Map(result.analyzed.map((j) => [j.id, j]));
+      const all = quick.map((j) => byId.get(j.id) ?? j);
+
+      const { jobs: merged, added } = store.addJobs(all);
+      store.bumpStat("jobsAnalyzed", result.analyzed.length);
       setJobs(merged);
-      setNotice((n) =>
+
+      const rest = quick.length - result.analyzed.length;
+      setNotice(
         [
-          `${added} new job${added === 1 ? "" : "s"} added (${analyzed.length} analyzed, ` +
-            `duplicates and removed jobs filtered out).`,
-          n,
+          `${added} new job${added === 1 ? "" : "s"} added. ${result.analyzed.length} analysed by AI` +
+            (rest > 0 ? `; ${rest} more carry a quick score — "Analyze more" runs the AI on them.` : "."),
+          result.failed
+            ? `${result.failed} of ${result.batches} AI batches failed (${result.firstError}); those jobs keep their quick score.`
+            : "",
         ]
           .filter(Boolean)
           .join(" ")
       );
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+      setStatus("");
+    }
+  }
+
+  /** Runs the AI over the next quick-scored jobs in this filter. */
+  async function analyzeMore() {
+    const resume = store.getResume();
+    if (!resume?.text) return setError("Add your resume first — matching needs it.");
+    const targets = awaitingAnalysis.slice(0, AUTO_ANALYZE);
+    if (!targets.length) return;
+    setError("");
+    setNotice("");
+    setBusy(true);
+    try {
+      const result = await analyzeJobs(targets, resume.text, store.getProfile(), (done, total) =>
+        setStatus(`Analysing ${targets.length} more… ${done}/${total} batches`)
+      );
+      const { jobs: merged } = store.addJobs(result.analyzed);
+      store.bumpStat("jobsAnalyzed", result.analyzed.length);
+      setJobs(merged);
+      setNotice(
+        `${result.analyzed.length} more analysed.` +
+          (result.failed ? ` ${result.failed} batch(es) failed: ${result.firstError}` : "")
+      );
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+      setStatus("");
+    }
+  }
+
+  /**
+   * AI-researched leads, on request only. They are guesses — the company is
+   * usually real, the role and link may not be — so they are never the silent
+   * answer to an empty or failed search.
+   */
+  async function researchLeads() {
+    const resume = store.getResume();
+    if (!resume?.text) return setError("Add your resume first — matching needs it.");
+    setError("");
+    setOfferAiLeads(false);
+    setBusy(true);
+    setStatus("Asking the AI to research likely openings…");
+    try {
+      const result = await jsonTask<{ jobs: Job[] }>("find_jobs", {
+        resume: resume.text,
+        profile: store.getProfile(),
+        count: 12,
+        focus: focus === "yc" ? "yc" : "all",
+      });
+      // Force the source: isVerifiedSource is what stops an invented listing
+      // reaching the apply pipeline, so it must not depend on the model
+      // remembering to label its own guesses.
+      const leads = (result.jobs || []).map((j) => ({
+        ...j,
+        source: "ai-researched",
+        aiScored: true,
+      }));
+      const { jobs: merged, added } = store.addJobs(leads);
+      setJobs(merged);
+      setFocus("all");
+      setNotice(`${added} AI-researched lead${added === 1 ? "" : "s"} added — verify each before applying.`);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -389,6 +520,15 @@ export default function JobsPage() {
       {error && (
         <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
           {error}
+          {offerAiLeads && (
+            <div className="mt-2 text-xs text-ink-300">
+              Or{" "}
+              <button className="underline text-neon-400" onClick={researchLeads} disabled={busy}>
+                ask the AI to suggest likely openings
+              </button>{" "}
+              — guesses to verify by hand, not live listings.
+            </div>
+          )}
         </div>
       )}
       {notice && !busy && (
@@ -423,10 +563,22 @@ export default function JobsPage() {
               <div className="text-xs text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3 leading-relaxed flex flex-wrap items-center gap-x-3 gap-y-2">
                 <span>
                   ✓ Showing {visible.length} listing{visible.length === 1 ? "" : "s"} in{" "}
-                  {activeFilter.label}, scored by AI against your resume.
+                  {activeFilter.label}.{" "}
+                  {awaitingAnalysis.length > 0
+                    ? `${visible.length - awaitingAnalysis.length} analysed by AI; ${awaitingAnalysis.length} have a quick score.`
+                    : "All analysed by AI against your resume."}
                   {unverified > 0 && ` ${unverified} AI-researched lead(s) mixed in.`}
                 </span>
                 <span className="ml-auto flex gap-3">
+                  {awaitingAnalysis.length > 0 && (
+                    <button
+                      className="underline hover:text-neon-300 font-semibold"
+                      onClick={analyzeMore}
+                      disabled={busy}
+                    >
+                      Analyze {Math.min(AUTO_ANALYZE, awaitingAnalysis.length)} more with AI
+                    </button>
+                  )}
                   {dismissedCount > 0 && (
                     <button className="underline hover:text-neon-300" onClick={restoreDismissed}>
                       Restore {dismissedCount} removed
@@ -486,8 +638,14 @@ const SOURCE_LABELS: Record<string, string> = {
 
 function JobCard({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
   const [open, setOpen] = useState(false);
-  const scoreTone =
-    job.matchScore >= 75 ? "badge-green" : job.matchScore >= 55 ? "badge-amber" : "badge-red";
+  const quick = job.aiScored === false;
+  const scoreTone = quick
+    ? "badge-blue"
+    : job.matchScore >= 75
+    ? "badge-green"
+    : job.matchScore >= 55
+    ? "badge-amber"
+    : "badge-red";
 
   return (
     <div className="card p-5">
@@ -502,7 +660,16 @@ function JobCard({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
           <span className="badge-blue text-[10px]">
             {SOURCE_LABELS[job.source] || job.source}
           </span>
-          <span className={scoreTone}>{job.matchScore}% match</span>
+          <span
+            className={scoreTone}
+            title={
+              quick
+                ? "Quick score from skills, experience and freshness — no AI yet. Use “Analyze more” for a full read."
+                : "AI match score against your resume"
+            }
+          >
+            {quick ? `~${job.matchScore} quick score` : `${job.matchScore}% match`}
+          </span>
           {job.salary && <span className="badge-blue">{job.salary}</span>}
         </div>
       </div>
@@ -513,9 +680,9 @@ function JobCard({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
         <button className="text-xs text-neon-400 hover:underline" onClick={() => setOpen(!open)}>
           {open ? "Hide analysis ▲" : "Full analysis ▼"}
         </button>
-        {job.url && (
+        {safeHref(job.url) && (
           <a
-            href={job.url}
+            href={safeHref(job.url)}
             target="_blank"
             rel="noreferrer"
             className="text-xs text-ink-400 hover:text-ink-200"
@@ -556,16 +723,18 @@ function JobCard({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
               ))}
             </ul>
           </div>
-          <div className="md:col-span-2 grid sm:grid-cols-2 gap-3 text-xs">
-            <div className="rounded-xl bg-ink-850 p-3">
-              <span className="font-bold text-ink-100">Job security: </span>
-              <span className="text-ink-300">{job.jobSecurity}</span>
+          {(job.jobSecurity || job.futureOutlook) && (
+            <div className="md:col-span-2 grid sm:grid-cols-2 gap-3 text-xs">
+              <div className="rounded-xl bg-ink-850 p-3">
+                <span className="font-bold text-ink-100">Job security: </span>
+                <span className="text-ink-300">{job.jobSecurity}</span>
+              </div>
+              <div className="rounded-xl bg-ink-850 p-3">
+                <span className="font-bold text-ink-100">Future outlook: </span>
+                <span className="text-ink-300">{job.futureOutlook}</span>
+              </div>
             </div>
-            <div className="rounded-xl bg-ink-850 p-3">
-              <span className="font-bold text-ink-100">Future outlook: </span>
-              <span className="text-ink-300">{job.futureOutlook}</span>
-            </div>
-          </div>
+          )}
           {job.description && (
             <p className="md:col-span-2 text-xs text-ink-400 leading-relaxed">
               {job.description}

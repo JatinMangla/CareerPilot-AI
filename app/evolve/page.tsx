@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { store, defaultStats, defaultStrategy } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { buildClaudeStrategyPrompt } from "@/lib/claudePrompt";
+import { outcomeSnapshot } from "@/lib/outcomes";
 import type { Strategy, Profile, UsageStats } from "@/lib/types";
 
 export default function EvolvePage() {
@@ -18,11 +19,31 @@ export default function EvolvePage() {
   const [claudeReply, setClaudeReply] = useState("");
   const [copied, setCopied] = useState(false);
   const [merging, setMerging] = useState(false);
+  const [skillsText, setSkillsText] = useState("");
+  const [profileSaved, setProfileSaved] = useState(false);
+
+  /**
+   * Versions from the stored strategy, not the one this render started with —
+   * two runs finishing close together both computed the same next version from
+   * the same stale copy, and one silently replaced the other.
+   */
+  function commitStrategy(result: { systemAddendum: string; notes: string[] }) {
+    const next: Strategy = {
+      version: (store.getStrategy().version ?? 1) + 1,
+      systemAddendum: result.systemAddendum,
+      notes: result.notes,
+      updatedAt: Date.now(),
+    };
+    store.setStrategy(next);
+    setStrategy(next);
+  }
 
   useEffect(() => {
     setStrategy(store.getStrategy());
     setStats(store.getStats());
-    setProfile(store.getProfile());
+    const p = store.getProfile();
+    setProfile(p);
+    setSkillsText(p.skills.join(", "));
   }, []);
 
   async function evolve() {
@@ -35,6 +56,7 @@ export default function EvolvePage() {
         {
           stats,
           strategy,
+          profile: store.getProfile(),
           userFeedback: feedback,
           // Real results, so the revision is grounded in what's actually
           // happening rather than in generic best practice.
@@ -42,14 +64,7 @@ export default function EvolvePage() {
           github: buildGithubSnapshot(),
         }
       );
-      const next: Strategy = {
-        version: (strategy?.version ?? 1) + 1,
-        systemAddendum: result.systemAddendum,
-        notes: result.notes,
-        updatedAt: Date.now(),
-      };
-      store.setStrategy(next);
-      setStrategy(next);
+      commitStrategy(result);
       setFeedback("");
       setJustEvolved(true);
     } catch (err: any) {
@@ -60,25 +75,17 @@ export default function EvolvePage() {
   }
 
   function saveProfile() {
-    if (profile) store.setProfile(profile);
+    if (!profile) return;
+    setProfileSaved(store.setProfile(profile) !== false);
+    setTimeout(() => setProfileSaved(false), 2500);
   }
 
-  /** Applications and what came of them, for grounding strategy revisions. */
+  /**
+   * Applications and what came of them — including which channel, match score
+   * and resume version produced replies — for grounding strategy revisions.
+   */
   function buildFunnelSnapshot() {
-    const apps = store.getApps();
-    const tracked = apps.filter((a) => a.outcome);
-    const count = (...s: string[]) => tracked.filter((a) => s.includes(a.outcome!)).length;
-    const referrals = store.getReferrals();
-    return {
-      applicationsPrepared: apps.length,
-      applied: tracked.length,
-      replied: count("replied", "screen", "interview", "offer"),
-      interviews: count("interview", "offer"),
-      offers: count("offer"),
-      rejectedOrGhosted: count("rejected", "ghosted"),
-      referralAsksSent: referrals.filter((r) => r.stage !== "planned").length,
-      referralsSecured: referrals.filter((r) => r.stage === "referred").length,
-    };
+    return outcomeSnapshot();
   }
 
   /** Last GitHub audit, if one has been run. */
@@ -134,14 +141,7 @@ export default function EvolvePage() {
           stats,
         }
       );
-      const next: Strategy = {
-        version: (strategy?.version ?? 1) + 1,
-        systemAddendum: result.systemAddendum,
-        notes: result.notes,
-        updatedAt: Date.now(),
-      };
-      store.setStrategy(next);
-      setStrategy(next);
+      commitStrategy(result);
       setJustEvolved(true);
     } catch (err: any) {
       setError(err.message);
@@ -164,14 +164,7 @@ export default function EvolvePage() {
           stats,
         }
       );
-      const next: Strategy = {
-        version: (strategy?.version ?? 1) + 1,
-        systemAddendum: result.systemAddendum,
-        notes: result.notes,
-        updatedAt: Date.now(),
-      };
-      store.setStrategy(next);
-      setStrategy(next);
+      commitStrategy(result);
       setClaudeReply("");
       setClaudePrompt("");
       setJustEvolved(true);
@@ -219,7 +212,7 @@ export default function EvolvePage() {
             >
               {merging ? "Merging…" : "↻ Apply latest research"}
             </button>
-            <button className="btn-primary text-base px-6 py-3" onClick={evolve} disabled={busy}>
+            <button className="btn-primary text-base px-6 py-3" onClick={evolve} disabled={busy || merging}>
               {busy ? "Evolving…" : "∞ Evolve now"}
             </button>
           </div>
@@ -307,7 +300,7 @@ export default function EvolvePage() {
         <button
           className="btn-primary"
           onClick={mergeBrains}
-          disabled={merging || !claudeReply.trim()}
+          disabled={busy || merging || !claudeReply.trim()}
         >
           {merging ? "Merging both brains…" : "⑤ Merge into my strategy"}
         </button>
@@ -374,17 +367,47 @@ export default function EvolvePage() {
                 onChange={(e) => setProfile({ ...profile, locations: e.target.value })}
               />
             </div>
-            <div className="sm:col-span-2">
-              <label className="label">Skills (comma-separated)</label>
+            <div>
+              <label className="label" htmlFor="profile-years">
+                Years of professional experience
+              </label>
               <input
+                id="profile-years"
                 className="input"
-                value={profile.skills.join(", ")}
+                type="number"
+                min={0}
+                max={50}
+                step={0.5}
+                placeholder="e.g. 4.5"
+                value={profile.yearsExperience ?? ""}
                 onChange={(e) =>
                   setProfile({
                     ...profile,
-                    skills: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                    yearsExperience: e.target.value === "" ? undefined : Number(e.target.value),
                   })
                 }
+              />
+              <p className="text-[11px] text-ink-500 mt-1">
+                Decides which levels job search treats as a fit, and how the AI scores seniority.
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label" htmlFor="profile-skills">
+                Skills (comma-separated)
+              </label>
+              {/* Edited as raw text: rebuilding it from the parsed list on every
+                  keystroke deleted a trailing comma, so no new skill could be typed. */}
+              <input
+                id="profile-skills"
+                className="input"
+                value={skillsText}
+                onChange={(e) => {
+                  setSkillsText(e.target.value);
+                  setProfile({
+                    ...profile,
+                    skills: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                  });
+                }}
               />
             </div>
           </div>
@@ -455,9 +478,16 @@ export default function EvolvePage() {
             </div>
           </div>
 
-          <button className="btn-primary" onClick={saveProfile}>
-            Save profile
-          </button>
+          <div className="flex items-center gap-3">
+            <button className="btn-primary" onClick={saveProfile}>
+              Save profile
+            </button>
+            {profileSaved && (
+              <span role="status" className="text-xs text-neon-400">
+                ✓ Saved — every AI task uses it from now on.
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>

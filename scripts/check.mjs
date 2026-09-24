@@ -9,8 +9,8 @@
  *  2. A raw `next build` prints hundreds of lines of progress. Only the errors
  *     matter, so only the errors are printed.
  *
- *   node scripts/check.mjs              typecheck + token budget + build
- *   node scripts/check.mjs --fast       skip the build (typecheck + budget only)
+ *   node scripts/check.mjs              typecheck + token budget + unit tests + build
+ *   node scripts/check.mjs --fast       skip the build
  */
 
 import { spawnSync } from "node:child_process";
@@ -67,6 +67,7 @@ if (isMain(import.meta.url)) {
   const steps = [
     () => run("typecheck    ", tsc, ["--noEmit"]),
     () => run("token budget ", join(ROOT, "scripts/ai-cost.mjs"), ["--check"]),
+    () => run("unit tests   ", join(ROOT, "scripts/test.mjs"), []),
   ];
   if (!process.argv.includes("--fast")) {
     steps.push(() => run("build        ", next, ["build"]));

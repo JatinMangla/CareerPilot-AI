@@ -4,6 +4,10 @@ Single-user AI career copilot: resume improvement and validation, job matching, 
 tailoring, an auto-apply pipeline, Gmail inbox triage, HR outreach, mock interviews, and a
 self-evolving strategy.
 
+**Read [docs/PROJECT-STATUS.md](docs/PROJECT-STATUS.md) first.** It covers the current state,
+how the non-obvious systems (auth, sync, AI streaming, job scoring, outcomes) work, and the open
+items. **Update its "Open items" and "Change log" whenever you finish work.**
+
 **Read [.claude/repo-map.md](.claude/repo-map.md) before exploring.** It is generated from the
 source and lists every page, API route, AI task and module with its importers. It costs ~2.7k
 tokens and saves far more than that in grepping. If it looks out of date, run
@@ -21,7 +25,8 @@ State lives in browser localStorage, mirrored to Upstash Redis for cross-device 
 Run these from **either** shell:
 
 ```bash
-node scripts/check.mjs                    # typecheck + token budget + build (quiet)
+node scripts/check.mjs                    # typecheck + token budget + unit tests + build (quiet)
+node scripts/test.mjs                     # unit tests only (node --test, no framework)
 node scripts/check.mjs --fast             # skip the build
 node scripts/doctor.mjs                   # what is configured, and what breaks without it
 node scripts/ai-cost.mjs                  # per-task AI token cost table + findings
@@ -87,6 +92,11 @@ when Redis is not configured.
   (bebee.com and friends) — they wall the application behind a payment or signup.
 - **Job identity is `fingerprint()`, not `id`.** Every search mints new ids, so dedupe and
   the user's "not interested" list are both keyed on company + normalized title.
+- **Email login codes need Redis.** The code hash and attempt counter live server-side
+  (`lib/otp.ts`); without Upstash the code route answers 503 and password login still works.
+  Sessions are revocable only with Redis (`lib/session.ts`).
+- **Sync is revisioned.** Lists sync as per-item patches and merge on the server
+  (`lib/syncMerge.ts`); a new list key needs an entry in `COLLECTION_ID` there.
 - **Never print or commit secrets.** `.env.local` holds live credentials; `scripts/doctor.mjs`
   reports whether a variable is set without revealing it. When piping a secret to
   `vercel env add` on Windows, pipe from a file via `cmd /c` — PowerShell pipes append `\r`
@@ -102,4 +112,7 @@ seconds). Running `vercel --prod` by hand is not needed.
 - Comments explain *why*, especially where the obvious approach was tried and failed. Match
   the density already in `lib/gemini.ts` and `lib/kv.ts`.
 - Every AI-facing failure needs a message a user can act on, not a stack trace.
-- There is no test suite. `node scripts/check.mjs` is the gate — keep it passing.
+- `node scripts/check.mjs` is the gate — keep it passing. Unit tests live in `tests/` and cover
+  the pure logic (filters, fingerprint, scoring, sync merge, agent field matching). Add a test
+  when you fix a bug in one of those modules. `next build` cannot reach Google Fonts from bash —
+  run it from PowerShell if the build step fails with ENOTFOUND.

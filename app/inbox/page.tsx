@@ -6,7 +6,9 @@ import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { Pager, usePaged } from "@/components/Pager";
-import type { InboxCursor, InboxMessage, MailCategory } from "@/lib/types";
+import { isTransactional, trimForStorage } from "@/lib/inboxFilters";
+import { applicationsAt, recordOutcome } from "@/lib/outcomes";
+import type { InboxCursor, InboxMessage, MailCategory, OutcomeStage } from "@/lib/types";
 
 const PAGE_SIZE = 20;
 
@@ -65,8 +67,30 @@ export default function InboxPage() {
     const classified: Record<string, any> = {};
     const BATCH = 12;
 
+    // Only mail that still needs a verdict goes to the AI. A rescan used to pay
+    // to re-classify everything it had already sorted; and transactional mail
+    // (bank alerts, sign-in codes, receipts) is filed locally so it never
+    // leaves for the free tier's servers at all.
+    const known = new Map(store.getInbox().map((m) => [m.uid, m]));
+    const now0 = new Date().toISOString();
+    const toClassify: InboxMessage[] = [];
+    for (const m of page) {
+      if (known.get(m.uid)?.classifiedAt) continue;
+      if (isTransactional(m)) {
+        classified[m.uid] = {
+          uid: m.uid,
+          category: "not_job",
+          relevance: 0,
+          summary: "Filed on this device as account/transaction mail — not sent to the AI.",
+          classifiedAt: now0,
+        };
+        continue;
+      }
+      toClassify.push(m);
+    }
+
     const batches: InboxMessage[][] = [];
-    for (let i = 0; i < page.length; i += BATCH) batches.push(page.slice(i, i + BATCH));
+    for (let i = 0; i < toClassify.length; i += BATCH) batches.push(toClassify.slice(i, i + BATCH));
 
     const outcomes = await mapPool(
       batches,
@@ -82,7 +106,8 @@ export default function InboxPage() {
             snippet: m.snippet,
           })),
         }),
-      (done) => setProgress(`Sorting job mail… ${Math.min(done * BATCH, page.length)}/${page.length}`)
+      (done) =>
+        setProgress(`Sorting job mail… ${Math.min(done * BATCH, toClassify.length)}/${toClassify.length}`)
     );
 
     for (const outcome of outcomes) {
@@ -104,14 +129,18 @@ export default function InboxPage() {
     // Merge the fresh copy UNDER the stored one. Spreading it on top was the old
     // behaviour and it wiped `handled` — a re-synced email the user had already
     // dealt with came back demanding action.
+    // A stored copy that was never classified must not win over a fresh verdict,
+    // though, or a rescan pays for triage and then throws the answer away.
     const byUid = new Map<string, InboxMessage>();
     for (const m of store.getInbox()) byUid.set(m.uid, m);
     for (const m of merged) {
       const prev = byUid.get(m.uid);
-      byUid.set(m.uid, prev ? { ...m, ...prev } : m);
+      if (!prev) byUid.set(m.uid, m);
+      else if (prev.classifiedAt) byUid.set(m.uid, { ...m, ...prev });
+      else byUid.set(m.uid, { ...prev, ...m, handled: prev.handled });
     }
-    const all = Array.from(byUid.values()).sort(
-      (a, b) => +new Date(b.date) - +new Date(a.date)
+    const all = trimForStorage(
+      Array.from(byUid.values()).sort((a, b) => +new Date(b.date) - +new Date(a.date))
     );
 
     store.setInbox(all);
@@ -402,8 +431,15 @@ export default function InboxPage() {
                         </p>
                       )}
                     </div>
-                    <span className="text-xs text-ink-500 shrink-0">{m.relevance ?? 0}</span>
+                    <span
+                      className="text-xs text-ink-500 shrink-0"
+                      title="Relevance to your job search, 0-100"
+                    >
+                      {m.relevance ?? 0}/100
+                    </span>
                   </div>
+
+                  <OutcomeLink message={m} />
 
                   <div className="flex gap-3 mt-3 flex-wrap text-xs">
                     <button
@@ -460,6 +496,47 @@ export default function InboxPage() {
           />
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Links an employer's reply to the application it answers, so the funnel is
+ * updated from the mail itself instead of relying on remembering to do it on
+ * another page. Matching is by employer, so it only offers — never records on
+ * its own.
+ */
+function OutcomeLink({ message }: { message: InboxMessage }) {
+  const [done, setDone] = useState("");
+  if (message.category !== "applied_reply" || !message.company) return null;
+  const matches = applicationsAt(message.company);
+  if (!matches.length) return null;
+  const target = matches.sort((a, b) => b.appliedAt - a.appliedAt)[0];
+
+  if (done) {
+    return (
+      <p className="text-xs text-neon-400 mt-2">
+        ✓ {target.title} at {target.company} marked as {done}.
+      </p>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 flex-wrap mt-2 text-xs text-ink-400">
+      <span>
+        Your application: <b className="text-ink-200">{target.title}</b> ({target.outcome}) — record as
+      </span>
+      {(["replied", "screen", "interview", "rejected"] as OutcomeStage[]).map((o) => (
+        <button
+          key={o}
+          className="rounded-full border border-ink-700 px-2 py-0.5 hover:text-ink-100 hover:border-ink-500"
+          onClick={() => {
+            recordOutcome(target, o);
+            setDone(o);
+          }}
+        >
+          {o}
+        </button>
+      ))}
     </div>
   );
 }

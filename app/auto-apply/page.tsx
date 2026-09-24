@@ -7,6 +7,8 @@ import { jsonTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { isBlockedListing } from "@/lib/jobFilters";
 import { openTabs, blockedHint, TAB_BATCH } from "@/lib/openTabs";
+import { safeHref } from "@/lib/safeUrl";
+import { applicationStamp } from "@/lib/outcomes";
 import { Pager, usePaged } from "@/components/Pager";
 import { OUTCOME_STAGES, type Job, type OutcomeStage, type PreparedApplication, type Profile } from "@/lib/types";
 
@@ -47,6 +49,17 @@ function portalSearchUrl(portal: string, job: Job): string {
 export default function AutoApplyPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [apps, setApps] = useState<PreparedApplication[]>([]);
+
+  /**
+   * Read-modify-write against the stored list, not the render's copy: a batch
+   * run awaits for minutes, and writing back its starting copy undid every
+   * outcome, removal or "applied" made in the meantime.
+   */
+  function updateApps(fn: (a: PreparedApplication[]) => PreparedApplication[]) {
+    const next = fn(store.getApps());
+    store.setApps(next);
+    setApps(next);
+  }
   const [profile, setProfile] = useState<Profile | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
@@ -88,7 +101,7 @@ export default function AutoApplyPage() {
     setError("");
     setBusy(true);
     const portal = profile?.portals[0] || "LinkedIn";
-    const next = [...apps];
+    const added: PreparedApplication[] = [];
     try {
       /*
        * These were prepared one at a time, so ten jobs meant ten deep-tier round
@@ -104,13 +117,13 @@ export default function AutoApplyPage() {
             coverLetter: string;
             tailoredHighlights: string[];
             screeningAnswers: { question: string; answer: string }[];
-          }>("prepare_application", { resume: resume.text, job, portal }),
+          }>("prepare_application", { resume: resume.text, job, portal, profile }),
         (done, total) => setProgress(`Preparing applications… ${done}/${total} done`)
       );
 
       for (const { item: job, value: prep } of outcomes) {
         if (!prep) continue;
-        next.push({
+        added.push({
           jobId: job.id,
           jobTitle: job.title,
           company: job.company,
@@ -122,10 +135,9 @@ export default function AutoApplyPage() {
           screeningAnswers: prep.screeningAnswers,
           at: Date.now(),
         });
-        store.bumpStat("applicationsPrepared");
       }
-      store.setApps(next);
-      setApps([...next]);
+      if (added.length) store.bumpStat("applicationsPrepared", added.length);
+      updateApps((all) => [...all, ...added]);
 
       const failed = outcomes.filter((o) => o.error);
       if (failed.length) {
@@ -144,28 +156,28 @@ export default function AutoApplyPage() {
 
   function markApplied(jobId: string) {
     const job = jobs.find((j) => j.id === jobId);
-    const next = apps.map((a) =>
-      a.jobId === jobId
-        ? {
-            ...a,
-            status: "applied" as const,
-            outcome: "applied" as const,
-            outcomeAt: Date.now(),
-            source: job?.source,
-          }
-        : a
+    updateApps((all) =>
+      all.map((a) =>
+        a.jobId === jobId
+          ? {
+              ...a,
+              status: "applied" as const,
+              outcome: "applied" as const,
+              outcomeAt: Date.now(),
+              // What went out, so replies can be compared by channel, fit and
+              // resume version rather than only counted.
+              ...applicationStamp(job),
+            }
+          : a
+      )
     );
-    store.setApps(next);
-    setApps(next);
   }
 
   /** What happened after applying — this is what makes the funnel meaningful. */
   function setOutcome(jobId: string, outcome: OutcomeStage) {
-    const next = apps.map((a) =>
-      a.jobId === jobId ? { ...a, outcome, outcomeAt: Date.now() } : a
+    updateApps((all) =>
+      all.map((a) => (a.jobId === jobId ? { ...a, outcome, outcomeAt: Date.now() } : a))
     );
-    store.setApps(next);
-    setApps(next);
   }
 
   /**
@@ -183,9 +195,7 @@ export default function AutoApplyPage() {
       const target = job || (app && { title: app.jobTitle, company: app.company });
       if (target) setJobs(store.dismissJob(target));
     }
-    const next = apps.filter((a) => a.jobId !== jobId);
-    store.setApps(next);
-    setApps(next);
+    updateApps((all) => all.filter((a) => a.jobId !== jobId));
   }
 
   function dismissJob(job: Job) {
@@ -194,13 +204,20 @@ export default function AutoApplyPage() {
 
   /** Open the applications you haven't submitted yet, one tab each. */
   function openPending() {
-    const pending = apps.filter(
-      (a) => a.status !== "applied" && a.url && !isBlockedListing(a.url, a.company)
-    );
+    // Never-opened first, then least recently opened. Without the stamp every
+    // click reopened the same first ten and the rest were unreachable.
+    const pending = apps
+      .filter((a) => a.status !== "applied" && a.url && !isBlockedListing(a.url, a.company))
+      .sort((a, b) => (a.openedAt ?? 0) - (b.openedAt ?? 0));
     if (!pending.length) return setError("Nothing left to open — everything is marked applied.");
     const batch = pending.slice(0, TAB_BATCH);
     const result = openTabs(batch.map((a) => a.url));
     setError(blockedHint(result));
+    if (result.opened) {
+      const now = Date.now();
+      const ids = new Set(batch.slice(0, result.opened).map((a) => a.jobId));
+      updateApps((all) => all.map((a) => (ids.has(a.jobId) ? { ...a, openedAt: now } : a)));
+    }
   }
 
   const unprepared = jobs
@@ -324,7 +341,7 @@ export default function AutoApplyPage() {
             <span className="text-sm text-ink-100">{job.title}</span>
             <span className="text-xs text-ink-400">@ {job.company}</span>
             <span className="ml-auto flex items-center gap-2">
-              <span className="badge-green">{job.matchScore}%</span>
+              <span className="badge-green">{job.aiScored === false ? `~${job.matchScore}` : `${job.matchScore}%`}</span>
               <button
                 className="text-[11px] text-coral-400 hover:underline"
                 title="Hide this job for good"
@@ -436,8 +453,8 @@ function AppCard({
               Apply on {p} ↗
             </a>
           ))}
-        {app.url && (
-          <a href={app.url} target="_blank" rel="noreferrer" className="btn-secondary text-xs px-3 py-1.5">
+        {safeHref(app.url) && (
+          <a href={safeHref(app.url)} target="_blank" rel="noreferrer" className="btn-secondary text-xs px-3 py-1.5">
             Direct listing ↗
           </a>
         )}

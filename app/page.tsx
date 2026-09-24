@@ -4,6 +4,15 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { store, defaultStats } from "@/lib/store";
 import { quota, type QuotaInfo } from "@/lib/quota";
+import {
+  breakdown,
+  funnelOf,
+  medianDaysToReply,
+  resumeLabel,
+  scoreBand,
+  trackedApplications,
+  type BreakdownRow,
+} from "@/lib/outcomes";
 import type { ResumeData, ValidationResult, UsageStats, Strategy } from "@/lib/types";
 
 export default function Dashboard() {
@@ -15,6 +24,11 @@ export default function Dashboard() {
   const [jobsCount, setJobsCount] = useState(0);
   const [quotas, setQuotas] = useState<QuotaInfo[]>([]);
   const [referralCount, setReferralCount] = useState(0);
+  const [name, setName] = useState("");
+  const [byChannel, setByChannel] = useState<BreakdownRow[]>([]);
+  const [byScore, setByScore] = useState<BreakdownRow[]>([]);
+  const [byResume, setByResume] = useState<BreakdownRow[]>([]);
+  const [daysToReply, setDaysToReply] = useState<number | null>(null);
   const [funnel, setFunnel] = useState({
     applied: 0,
     replied: 0,
@@ -35,25 +49,14 @@ export default function Dashboard() {
     setJobsCount(store.getJobs().length);
     setQuotas(quota.all());
 
-    // Anything past "applied" counts toward the stages before it, so the funnel
-    // reads as a funnel rather than as disconnected buckets.
-    const apps = store.getApps().filter((a) => a.outcome);
-    const has = (...s: string[]) => apps.filter((a) => s.includes(a.outcome!)).length;
-    const applied = apps.length;
-    const replied = has("replied", "screen", "interview", "offer");
-    const screen = has("screen", "interview", "offer");
-    const interview = has("interview", "offer");
-    const offer = has("offer");
-    setFunnel({
-      applied,
-      replied,
-      screen,
-      interview,
-      offer,
-      rejected: has("rejected", "ghosted"),
-      replyRate: applied ? (replied / applied) * 100 : 0,
-      interviewRate: applied ? (interview / applied) * 100 : 0,
-    });
+    // Apply Kits and Auto-Pilot together — the funnel used to read only the first.
+    const tracked = trackedApplications();
+    setFunnel(funnelOf(tracked));
+    setByChannel(breakdown(tracked, (a) => a.channel));
+    setByScore(breakdown(tracked, scoreBand));
+    setByResume(breakdown(tracked, resumeLabel));
+    setDaysToReply(medianDaysToReply(tracked));
+    setName(store.getProfile().name?.split(" ")[0] || "");
     setReferralCount(store.getReferrals().filter((r) => r.stage !== "planned").length);
   }, []);
 
@@ -68,7 +71,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="h1">Welcome back, Jatin 👋</h1>
+        <h1 className="h1">Welcome back{name ? `, ${name}` : ""} 👋</h1>
         <p className="muted mt-1">
           Your AI career copilot — resume, matching, applications, and interview prep in
           one place.
@@ -197,7 +200,15 @@ export default function Dashboard() {
                     {referralCount === 1 ? "" : "s"} in flight
                   </>
                 )}
+                {daysToReply !== null && <> · first reply after ~{daysToReply} days</>}
               </p>
+              {/* What is working, not just how much: the comparison that should
+                  decide where the next week goes. */}
+              <div className="grid md:grid-cols-3 gap-4 mt-5">
+                <Breakdown title="By channel" rows={byChannel} />
+                <Breakdown title="By match score" rows={byScore} />
+                <Breakdown title="By resume version" rows={byResume} />
+              </div>
             </>
           )}
         </div>
@@ -224,8 +235,8 @@ export default function Dashboard() {
               );
             })}
             <p className="text-[11px] text-ink-400 leading-relaxed">
-              You&apos;ll get a warning banner before any free limit is crossed, and calls
-              pause at the limit. No card is attached to these services, so{" "}
+              You&apos;ll get a warning banner as you approach a free limit. Past it, the AI
+              starts answering &quot;rate-limited&quot; until the daily reset. No card is attached to these services, so{" "}
               <b className="text-ink-200">no bill can ever be generated</b> — usage simply
               resets next day/month.
             </p>
@@ -242,6 +253,37 @@ export default function Dashboard() {
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Breakdown({ title, rows }: { title: string; rows: BreakdownRow[] }) {
+  if (!rows.length) return null;
+  return (
+    <div>
+      <h3 className="text-[11px] uppercase tracking-wider text-ink-400 font-semibold mb-2">{title}</h3>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-ink-500 text-left">
+            <th className="font-normal pb-1"></th>
+            <th className="font-normal pb-1 text-right">Sent</th>
+            <th className="font-normal pb-1 text-right">Replies</th>
+            <th className="font-normal pb-1 text-right">Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label} className="text-ink-300">
+              <td className="py-0.5 pr-2">{r.label}</td>
+              <td className="py-0.5 text-right">{r.applied}</td>
+              <td className="py-0.5 text-right">{r.replied}</td>
+              <td className={`py-0.5 text-right font-semibold ${r.replyRate >= 10 ? "text-neon-400" : "text-ink-200"}`}>
+                {r.replyRate.toFixed(0)}%
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

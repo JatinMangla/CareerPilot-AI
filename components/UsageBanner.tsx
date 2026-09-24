@@ -32,7 +32,7 @@ export default function UsageBanner() {
             {over ? "⛔" : "⚠️"} <b>{q.label}:</b> {q.used}/{q.limit} used this{" "}
             {q.period}.{" "}
             {over
-              ? `Paused until next ${q.period} to keep you on the free tier — no bill will be generated.`
+              ? `Past the usual free allowance for this ${q.period}. Requests keep going, but expect "rate-limited" answers until it resets — no bill is generated.`
               : `Approaching the free limit — slow down to stay free.`}
           </div>
         );

@@ -36,6 +36,7 @@ export default function PracticePage() {
     setShowOptimal(false);
     try {
       const question = await jsonTask<PracticeQuestion>("practice_question", {
+        profile: store.getProfile(),
         topic,
         difficulty,
         format,
@@ -57,7 +58,11 @@ export default function PracticePage() {
     setBusy("review");
     setShowOptimal(false);
     try {
-      const r = await jsonTask<SolutionReview>("review_solution", { question: q, code });
+      const r = await jsonTask<SolutionReview>("review_solution", {
+        question: q,
+        code,
+        profile: store.getProfile(),
+      });
       setReview(r);
       if (r.verdict === "Accepted") store.bumpStat("practiceSolved");
     } catch (err: any) {

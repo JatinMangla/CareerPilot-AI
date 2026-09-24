@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { requireSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -25,6 +26,8 @@ function isEmail(v: unknown): v is string {
 }
 
 export async function POST(req: Request) {
+  const denied = await requireSession();
+  if (denied) return denied;
   const user = (process.env.GMAIL_USER || process.env.AUTH_EMAIL || "").trim();
   const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s+/g, ""); // Google shows it in groups of 4
 

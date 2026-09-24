@@ -76,10 +76,37 @@ export function isVerifiedSource(source: string | undefined): boolean {
   return !!source && VERIFIED_SOURCES.has(source);
 }
 
+/**
+ * Matching is by hostname, not substring. Substrings mislabelled links:
+ * "lever.co" matched clever.com, "shine." matched moonshine.com, and "workday"
+ * matched any URL containing the word.
+ */
+function hostOf(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/** host is `domain` or a subdomain of it. */
+const onDomain = (host: string, domain: string) => host === domain || host.endsWith("." + domain);
+
+/** A portal label ("linkedin.", "angel.co") as a whole part of the hostname. */
+function isPortalHost(host: string): boolean {
+  const labels = host.split(".");
+  return PORTALS.some((p) => {
+    const parts = p.replace(/\.$/, "").split(".");
+    // every part of the portal name appears as consecutive labels of the host
+    return labels.some((_, i) => parts.every((part, j) => labels[i + j] === part));
+  });
+}
+
 export function detectAts(rawUrl: string): AtsInfo {
   const url = (rawUrl || "").toLowerCase();
+  const host = hostOf(rawUrl);
 
-  if (PORTALS.some((p) => url.includes(p))) {
+  if (isPortalHost(host)) {
     return {
       kind: "portal",
       label: "Job portal",
@@ -89,7 +116,8 @@ export function detectAts(rawUrl: string): AtsInfo {
     };
   }
 
-  if (url.includes("greenhouse.io") || url.includes("grnh.se"))
+  // gh_jid: a Greenhouse form embedded in the company's own careers page.
+  if (onDomain(host, "greenhouse.io") || onDomain(host, "grnh.se") || /[?&]gh_jid=/.test(url))
     return {
       kind: "greenhouse",
       label: "Greenhouse",
@@ -98,7 +126,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       note: "Standard single-page form — filled completely; read it and press Submit.",
     };
 
-  if (url.includes("lever.co"))
+  if (onDomain(host, "lever.co"))
     return {
       kind: "lever",
       label: "Lever",
@@ -107,7 +135,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       note: "Standard single-page form — filled completely; read it and press Submit.",
     };
 
-  if (url.includes("workatastartup.com"))
+  if (onDomain(host, "workatastartup.com"))
     return {
       kind: "workatastartup",
       label: "YC · Work at a Startup",
@@ -116,7 +144,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       note: "YC's own board needs a signed-in account and sends a personal message to the founder — the agent fills what it can, you review and send.",
     };
 
-  if (url.includes("ycombinator.com"))
+  if (onDomain(host, "ycombinator.com"))
     return {
       kind: "ycombinator",
       label: "Y Combinator",
@@ -125,7 +153,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       note: "YC listings usually hand off to the company's own ATS (Ashby/Greenhouse/Lever) — open it and the real application URL is a standard ATS form.",
     };
 
-  if (url.includes("ashbyhq.com"))
+  if (onDomain(host, "ashbyhq.com"))
     return {
       kind: "ashby",
       label: "Ashby",
@@ -134,7 +162,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       note: "Standard single-page form — filled completely; read it and press Submit.",
     };
 
-  if (url.includes("workable.com") || url.includes("apply.workable"))
+  if (onDomain(host, "workable.com"))
     return {
       kind: "workable",
       label: "Workable",
@@ -143,7 +171,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       note: "Standard single-page form — filled completely; read it and press Submit.",
     };
 
-  if (url.includes("smartrecruiters.com"))
+  if (onDomain(host, "smartrecruiters.com"))
     return {
       kind: "smartrecruiters",
       label: "SmartRecruiters",
@@ -152,7 +180,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       note: "Auto-fills; submit yourself after review (layout varies by company).",
     };
 
-  if (url.includes("recruitee.com"))
+  if (onDomain(host, "recruitee.com"))
     return {
       kind: "recruitee",
       label: "Recruitee",
@@ -161,7 +189,7 @@ export function detectAts(rawUrl: string): AtsInfo {
       note: "Auto-fills; submit yourself after review.",
     };
 
-  if (url.includes("myworkdayjobs.com") || url.includes("workday"))
+  if (onDomain(host, "myworkdayjobs.com") || onDomain(host, "workday.com"))
     return {
       kind: "workday",
       label: "Workday",

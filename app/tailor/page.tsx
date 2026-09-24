@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask, streamTask } from "@/lib/aiClient";
+import { describeClaims, newClaims } from "@/lib/claimCheck";
 import type { TailorPlan, ResumeData } from "@/lib/types";
 
 type Stage = "input" | "review" | "result";
@@ -15,10 +16,17 @@ export default function TailorPage() {
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [stage, setStage] = useState<Stage>("input");
   const [output, setOutput] = useState("");
+  /** Only a stream that finished may be saved; a stopped or cut-off one may not. */
+  const [complete, setComplete] = useState(false);
+  const [modelNote, setModelNote] = useState("");
+  const [claimNote, setClaimNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [hasResume, setHasResume] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
+  // Leaving the page ends the stream, instead of letting it run on unseen and
+  // spend the day's free quota.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     setHasResume(!!store.getResume()?.text);
@@ -34,6 +42,7 @@ export default function TailorPage() {
       const p = await jsonTask<TailorPlan>("tailor_plan", {
         resume: resume.text,
         jobDescription: jd,
+        profile: store.getProfile(),
       });
       setPlan(p);
       setAccepted(Object.fromEntries(p.changes.map((c) => [c.id, true])));
@@ -54,6 +63,8 @@ export default function TailorPage() {
     setError("");
     setBusy(true);
     setOutput("");
+    setComplete(false);
+    setModelNote("");
     setStage("result");
     abortRef.current = new AbortController();
     try {
@@ -65,14 +76,25 @@ export default function TailorPage() {
         {
           resume: resume.text,
           jobDescription: jd,
+          profile: store.getProfile(),
           acceptedChanges,
           answers: answersText,
         },
         (full) => setOutput(full),
-        abortRef.current.signal
+        {
+          signal: abortRef.current.signal,
+          onMeta: (m) =>
+            setModelNote(
+              m.fallback
+                ? `Written by ${m.model} because the stronger model was busy — worth regenerating later for a sharper version.`
+                : ""
+            ),
+        }
       );
       store.bumpStat("tailors");
-      void final;
+      setOutput(final);
+      setComplete(true);
+      setClaimNote(describeClaims(newClaims(resume.text, final)));
     } catch (err: any) {
       if (err.name !== "AbortError") setError(err.message);
     } finally {
@@ -247,13 +269,24 @@ export default function TailorPage() {
               Stop
             </button>
           ) : (
-            <div className="flex gap-2 flex-wrap">
-              <button className="btn-primary" onClick={saveTailored} disabled={!output.trim()}>
+            <div className="flex gap-2 flex-wrap items-center">
+              {!complete && output.trim() && (
+                <p className="w-full text-xs text-amberx-400">
+                  This version is incomplete (stopped or cut off), so it can&apos;t be saved. Apply the changes again.
+                </p>
+              )}
+              {complete && modelNote && <p className="w-full text-xs text-ink-400">{modelNote}</p>}
+              {complete && claimNote && (
+                <p className="w-full text-xs text-amberx-400">
+                  Not in your resume before: {claimNote}. Make sure each is true before saving.
+                </p>
+              )}
+              <button className="btn-primary" onClick={saveTailored} disabled={!complete || !output.trim()}>
                 ✓ Save as my resume
               </button>
               <button
                 className="btn-secondary"
-                disabled={!output.trim()}
+                disabled={!complete || !output.trim()}
                 onClick={async () => {
                   const { buildResumePdf, downloadBlob } = await import("@/lib/pdf/resumeDoc");
                   const name = store.getProfile().name || "Resume";

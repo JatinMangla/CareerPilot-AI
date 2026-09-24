@@ -23,6 +23,7 @@ export default function OutreachPage() {
   const [body, setBody] = useState("");
   const [note, setNote] = useState("");
   const [attachResume, setAttachResume] = useState(true);
+  const [shareCompensation, setShareCompensation] = useState(false);
   const [busy, setBusy] = useState<"" | "compose" | "send">("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -66,6 +67,7 @@ export default function OutreachPage() {
           tone,
           resume: resume.text,
           profile: store.getProfile(),
+          shareCompensation,
         }
       );
       setSubject(out.subject);
@@ -282,6 +284,19 @@ export default function OutreachPage() {
               <option>brief — under 100 words</option>
             </select>
           </div>
+
+          <label className="flex items-start gap-2.5 text-xs text-ink-300 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={shareCompensation}
+              onChange={(e) => setShareCompensation(e.target.checked)}
+            />
+            <span>
+              Include my notice period and expected CTC if they ask. Off by default, so a
+              reply never hands those to a sender you haven&apos;t checked.
+            </span>
+          </label>
 
           <button
             className="btn-primary w-full"

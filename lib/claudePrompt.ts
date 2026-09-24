@@ -1,3 +1,4 @@
+import type { outcomeSnapshot } from "./outcomes";
 import type { Profile, Strategy, UsageStats, ValidationResult } from "./types";
 
 export interface ClaudePromptInput {
@@ -8,7 +9,7 @@ export interface ClaudePromptInput {
   validation?: ValidationResult | null;
   feedback?: string;
   /** Real outcomes, so Claude critiques results rather than intentions. */
-  funnel?: Record<string, number> | null;
+  funnel?: ReturnType<typeof outcomeSnapshot> | null;
   /** Last GitHub audit, if one has been run. */
   github?: Record<string, unknown> | null;
 }
@@ -23,7 +24,9 @@ export function buildClaudeStrategyPrompt(opts: ClaudePromptInput): string {
   const { profile, strategy, stats, resume, validation, feedback, funnel, github } = opts;
 
   const resumeBlock = resume
-    ? `<my_resume>\n${resume.slice(0, 6000)}\n</my_resume>`
+    ? `<my_resume>\n${resume.slice(0, 6000)}${
+        resume.length > 6000 ? "\n[…resume truncated at 6,000 characters]" : ""
+      }\n</my_resume>`
     : "(resume not provided)";
 
   const validationBlock = validation
@@ -39,7 +42,11 @@ export function buildClaudeStrategyPrompt(opts: ClaudePromptInput): string {
 
   const funnelBlock =
     funnel && (funnel.applied ?? 0) > 0
-      ? `Actual results so far: ${funnel.applied} applications sent, ${funnel.replied} replies, ${funnel.interviews} interviews, ${funnel.offers} offers. Referral asks sent: ${funnel.referralAsksSent ?? 0}; referrals secured: ${funnel.referralsSecured ?? 0}.`
+      ? `Actual results so far: ${funnel.applied} applications sent, ${funnel.replied} replies, ${funnel.interview} interviews, ${funnel.offer} offers. Replies by channel: ${
+          funnel.byChannel.map((c) => `${c.label} ${c.replied}/${c.applied}`).join(", ") || "n/a"
+        }. Replies by match score: ${
+          funnel.byMatchScore.map((c) => `${c.label} ${c.replied}/${c.applied}`).join(", ") || "n/a"
+        }. Referral asks sent: ${funnel.referralAsksSent}; referrals secured: ${funnel.referralsSecured}.`
       : "No outcomes recorded yet — nothing has been applied to and tracked through to a result.";
 
   const githubBlock = github

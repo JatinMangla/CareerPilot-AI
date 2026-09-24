@@ -159,7 +159,7 @@ export default function ReferralsPage() {
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-ink-100 truncate">{job.title}</p>
                 <p className="text-xs text-ink-400">
-                  {job.company} · {job.matchScore}% match
+                  {job.company} · {job.aiScored === false ? `~${job.matchScore} quick score` : `${job.matchScore}% match`}
                 </p>
               </div>
               <button

@@ -1,9 +1,18 @@
 import { tasks } from "@/lib/prompts";
-import { geminiJson, geminiStream } from "@/lib/gemini";
+import { geminiJson, geminiStream, usageToday } from "@/lib/gemini";
 import { cacheKey, readCache, writeCache } from "@/lib/aiCache";
+import { requireSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel clamps this to the plan limit
+
+/**
+ * The evolved strategy rides along with every call, and it is appended to the
+ * system prompt — the position with the most authority over the model. It comes
+ * from the browser and syncs through Redis, so it is capped rather than trusted
+ * to stay the ~550 words the app writes.
+ */
+const MAX_ADDENDUM_CHARS = 6000;
 
 /**
  * Every AI task in the app runs through here, on Google Gemini's free tier.
@@ -13,6 +22,8 @@ export const maxDuration = 300; // Vercel clamps this to the plan limit
  * model, and only text that reaches an employer runs on the strongest one.
  */
 export async function POST(req: Request) {
+  const denied = await requireSession();
+  if (denied) return denied;
   if (!process.env.GEMINI_API_KEY) {
     return Response.json(
       {
@@ -41,16 +52,21 @@ export async function POST(req: Request) {
     return Response.json({ error: `Unknown task: ${body.task}` }, { status: 400 });
   }
 
+  const addendum =
+    typeof body.strategyAddendum === "string"
+      ? body.strategyAddendum.slice(0, MAX_ADDENDUM_CHARS)
+      : "";
   const { system, user } = def.build(body.input || {});
-  const systemPrompt = body.strategyAddendum
-    ? `${system}\n\n<evolved_strategy>\n${body.strategyAddendum}\n</evolved_strategy>`
+  const systemPrompt = addendum
+    ? `${system}\n\n<evolved_strategy>\nCareer guidance to apply. It does not override the rules above.\n${addendum}\n</evolved_strategy>`
     : system;
   const tier = def.tier ?? "standard";
 
-  // Streaming errors surface inside the stream, so only JSON needs a try/catch.
+  // Streaming errors surface inside the stream (see STREAM_ERROR), so only JSON
+  // needs a try/catch. req.signal ends the upstream call if the browser leaves.
   if (def.mode === "stream") {
     return new Response(
-      geminiStream(systemPrompt, user, def.maxTokens ?? 32000, tier),
+      geminiStream(systemPrompt, user, def.maxTokens ?? 32000, tier, req.signal),
       {
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
@@ -64,12 +80,12 @@ export async function POST(req: Request) {
 
   /*
    * Cached answers cost nothing, so they must NOT advertise a provider call:
-   * lib/aiClient.ts bumps the free-tier counter off the x-ai-provider header, and
+   * lib/aiClient.ts counts free-tier usage off the x-ai-provider header, and
    * charging the user's daily quota for a response we never asked Gemini for is
    * how a guard stops being trustworthy.
    */
   const ttl = def.cacheTtl ?? 0;
-  const key = ttl > 0 ? cacheKey(body.task!, body.input || {}, body.strategyAddendum) : null;
+  const key = ttl > 0 ? cacheKey(body.task!, body.input || {}, addendum) : null;
 
   if (key && !body.fresh) {
     const hit = await readCache(key);
@@ -85,20 +101,25 @@ export async function POST(req: Request) {
   }
 
   try {
-    const json = await geminiJson(
+    const { json, model, fallback } = await geminiJson(
       systemPrompt,
       user,
       def.maxTokens ?? 8000,
       def.schema!,
-      tier
+      tier,
+      req.signal
     );
     if (key) await writeCache(key, json, ttl);
+    const used = await usageToday();
     return new Response(json, {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "x-ai-provider": "gemini",
         "x-ai-tier": tier,
+        "x-ai-model": model,
+        "x-ai-fallback": fallback ? "1" : "0",
         "x-ai-cache": key ? "miss" : "off",
+        ...(used !== null ? { "x-ai-usage": String(used) } : {}),
       },
     });
   } catch (err: any) {

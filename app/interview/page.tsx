@@ -80,8 +80,10 @@ export default function InterviewPage() {
     try {
       acc = await streamTask(
         "interview_turn",
-        { mode: m, history: historyText, resume: resume.text, stage },
-        (full) => setTurns([...history, { role: "ai", text: full }])
+        { mode: m, history: historyText, resume: resume.text, stage, profile: store.getProfile() },
+        (full) => setTurns([...history, { role: "ai", text: full }]),
+        // Half a question is still a question; nothing here gets saved.
+        { allowIncomplete: true }
       );
       speak(acc);
     } catch (err: any) {
@@ -142,8 +144,11 @@ export default function InterviewPage() {
       .map((t) => `${t.role === "ai" ? "INTERVIEWER" : "CANDIDATE"}: ${t.text}`)
       .join("\n\n");
     try {
-      await streamTask("interview_feedback", { history: historyText }, (full) =>
-        setFeedback(full)
+      await streamTask(
+        "interview_feedback",
+        { history: historyText, profile: store.getProfile() },
+        (full) => setFeedback(full),
+        { allowIncomplete: true }
       );
       store.bumpStat("interviews");
     } catch (err: any) {

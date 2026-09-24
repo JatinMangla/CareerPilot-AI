@@ -7,9 +7,11 @@ import { jsonTask, streamTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { detectAts, isVerifiedSource } from "@/lib/ats";
 import { openTabs, blockedHint, TAB_BATCH } from "@/lib/openTabs";
+import { safeHref } from "@/lib/safeUrl";
 import { isBlockedListing } from "@/lib/jobFilters";
 import { Pager, usePaged } from "@/components/Pager";
-import type { AutoTailorPlan, Job, QueuedApplication } from "@/lib/types";
+import { OUTCOME_STAGES, type AutoTailorPlan, type Job, type OutcomeStage, type QueuedApplication } from "@/lib/types";
+import { applicationStamp } from "@/lib/outcomes";
 
 const PAGE_SIZE = 15;
 
@@ -30,6 +32,15 @@ export default function AutoPilotPage() {
   function saveQueue(q: QueuedApplication[]) {
     store.setQueue(q);
     setQueue([...q]);
+  }
+
+  /**
+   * Read-modify-write against the stored queue, not the render's copy. A batch
+   * run awaits for minutes; writing back the copy it started with undid every
+   * Discard, Mark submitted or Open made in the meantime.
+   */
+  function updateQueue(fn: (q: QueuedApplication[]) => QueuedApplication[]) {
+    saveQueue(fn(store.getQueue()));
   }
 
   /** Step 1 — AI tailors each selected job, splitting safe vs new claims. */
@@ -71,7 +82,7 @@ export default function AutoPilotPage() {
 
     setError("");
     setBusy(true);
-    const next = [...queue];
+    const added: QueuedApplication[] = [];
     try {
       // Ten independent deep-tier passes ran back to back here, so the wait was
       // the sum of all ten. Overlap them; the per-job failure handling below is
@@ -85,7 +96,14 @@ export default function AutoPilotPage() {
         (done, total) => setProgress(`Tailoring… ${done}/${total} done`)
       );
 
+      let quotaError = "";
       for (const { item: job, value: plan, error } of outcomes) {
+        // Out of free quota is not this job's fault: leave it selectable for the
+        // next run instead of parking it behind a dead "failed" card.
+        if (!plan && /^Free limit reached/.test(error?.message || "")) {
+          quotaError = error!.message;
+          continue;
+        }
         const ats = detectAts(job.url);
         const base = {
           jobId: job.id,
@@ -101,14 +119,14 @@ export default function AutoPilotPage() {
 
         if (plan) {
           const needsApproval = (plan.newClaims?.length || 0) > 0;
-          next.push({
+          added.push({
             ...base,
             status: needsApproval ? "needs_approval" : "approved",
             plan,
             finalResume: plan.tailoredResume,
           });
         } else {
-          next.push({
+          added.push({
             ...base,
             status: "failed",
             plan: null,
@@ -117,7 +135,8 @@ export default function AutoPilotPage() {
           });
         }
       }
-      saveQueue(next);
+      updateQueue((q) => [...q, ...added]);
+      if (quotaError) setError(quotaError);
     } finally {
       setBusy(false);
       setProgress("");
@@ -138,11 +157,16 @@ export default function AutoPilotPage() {
       if (approvedClaims.length > 0) {
         finalResume = await streamTask(
           "merge_claims",
-          { resume: item.plan!.tailoredResume, approvedClaims, answers },
+          {
+            resume: item.plan!.tailoredResume,
+            approvedClaims,
+            answers,
+            profile: store.getProfile(),
+          },
           () => {}
         );
       }
-      const next = queue.map((q) =>
+      updateQueue((all) => all.map((q) =>
         q.jobId === item.jobId
           ? {
               ...q,
@@ -151,8 +175,7 @@ export default function AutoPilotPage() {
               finalResume: finalResume.trim(),
             }
           : q
-      );
-      saveQueue(next);
+      ));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -171,12 +194,31 @@ export default function AutoPilotPage() {
       const target = job || (q && { title: q.title, company: q.company });
       if (target) setJobs(store.dismissJob(target));
     }
-    saveQueue(queue.filter((q) => q.jobId !== jobId));
+    updateQueue((all) => all.filter((q) => q.jobId !== jobId));
   }
 
   function markSubmitted(jobId: string) {
-    saveQueue(
-      queue.map((q) => (q.jobId === jobId ? { ...q, status: "submitted" as const } : q))
+    // Recorded as an application, so Auto-Pilot sends reach the funnel — before,
+    // "Mark submitted" set no outcome and the dashboard never counted them.
+    const job = jobs.find((j) => j.id === jobId);
+    updateQueue((all) =>
+      all.map((q) =>
+        q.jobId === jobId
+          ? {
+              ...q,
+              status: "submitted" as const,
+              outcome: q.outcome ?? ("applied" as const),
+              outcomeAt: q.outcomeAt ?? Date.now(),
+              ...applicationStamp(job),
+            }
+          : q
+      )
+    );
+  }
+
+  function setOutcome(jobId: string, outcome: OutcomeStage) {
+    updateQueue((all) =>
+      all.map((q) => (q.jobId === jobId ? { ...q, outcome, outcomeAt: Date.now() } : q))
     );
   }
 
@@ -204,8 +246,8 @@ export default function AutoPilotPage() {
 
     if (result.opened) {
       const ids = new Set(batch.slice(0, result.opened).map((q) => q.jobId));
-      saveQueue(
-        queue.map((q) => (ids.has(q.jobId) ? { ...q, status: "opened" as const } : q))
+      updateQueue((all) =>
+        all.map((q) => (ids.has(q.jobId) ? { ...q, status: "opened" as const } : q))
       );
     }
     if (!hint) {
@@ -273,9 +315,12 @@ export default function AutoPilotPage() {
         new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
         "apply-queue.json"
       );
-      saveQueue(
-        queue.map((q) =>
-          q.status === "approved" ? { ...q, status: "exported" as const } : q
+      const exportedIds = new Set(approved.map((q) => q.jobId));
+      updateQueue((all) =>
+        all.map((q) =>
+          q.status === "approved" && exportedIds.has(q.jobId)
+            ? { ...q, status: "exported" as const }
+            : q
         )
       );
     } catch (err: any) {
@@ -450,7 +495,7 @@ export default function AutoPilotPage() {
                       {ats.label}
                     </span>
                   )}
-                  <span className="badge-blue">{job.matchScore}%</span>
+                  <span className="badge-blue">{job.aiScored === false ? `~${job.matchScore}` : `${job.matchScore}%`}</span>
                   <button
                     className="text-[11px] text-coral-400 hover:underline"
                     title="Hide this job for good"
@@ -506,6 +551,7 @@ export default function AutoPilotPage() {
               onApprove={applyApprovals}
               onRemove={(hideJob) => removeItem(item.jobId, hideJob)}
               onSubmitted={() => markSubmitted(item.jobId)}
+              onOutcome={(o) => setOutcome(item.jobId, o)}
             />
           ))}
           <Pager
@@ -562,12 +608,14 @@ function QueueCard({
   onApprove,
   onRemove,
   onSubmitted,
+  onOutcome,
 }: {
   item: QueuedApplication;
   busy: boolean;
   onApprove: (item: QueuedApplication, ids: string[], answers: string) => void;
   onRemove: (hideJob: boolean) => void;
   onSubmitted: () => void;
+  onOutcome: (outcome: OutcomeStage) => void;
 }) {
   const [open, setOpen] = useState(item.status === "needs_approval");
   const [approved, setApproved] = useState<Record<string, boolean>>({});
@@ -618,18 +666,36 @@ function QueueCard({
         <button className="text-xs text-neon-400 hover:underline" onClick={() => setOpen(!open)}>
           {open ? "Hide details ▲" : "Review details ▼"}
         </button>
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-ink-400 hover:text-ink-200"
-        >
-          Open listing ↗
-        </a>
+        {safeHref(item.url) && (
+          <a
+            href={safeHref(item.url)}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-ink-400 hover:text-ink-200"
+          >
+            Open listing ↗
+          </a>
+        )}
         {item.status !== "submitted" && item.status !== "failed" && (
           <button className="text-xs text-neon-400 hover:underline" onClick={onSubmitted}>
             Mark submitted
           </button>
+        )}
+        {item.status === "submitted" && (
+          <label className="text-xs text-ink-400 flex items-center gap-1.5">
+            What happened:
+            <select
+              className="bg-ink-850 border border-ink-700 rounded-md px-1.5 py-0.5 text-ink-200"
+              value={item.outcome || "applied"}
+              onChange={(e) => onOutcome(e.target.value as OutcomeStage)}
+            >
+              {OUTCOME_STAGES.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
         <button className="text-xs text-ink-400 hover:text-ink-200" onClick={() => onRemove(false)}>
           Discard kit
