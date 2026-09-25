@@ -64,7 +64,7 @@ export default function Dashboard() {
     { done: !!resume, label: "Upload your resume", href: "/resume" },
     { done: !!validation, label: "Validate against industry standards", href: "/validate" },
     { done: jobsCount > 0, label: "Find matching jobs", href: "/jobs" },
-    { done: appsCount > 0, label: "Prepare applications", href: "/auto-apply" },
+    { done: appsCount > 0, label: "Prepare applications", href: "/apply" },
     { done: stats.interviews > 0, label: "Do a mock interview", href: "/interview" },
   ];
 
@@ -158,7 +158,7 @@ export default function Dashboard() {
           {funnel.applied === 0 ? (
             <p className="text-sm text-ink-400">
               Nothing tracked yet. Mark applications as applied on the{" "}
-              <Link href="/auto-apply" className="text-neon-400 underline">
+              <Link href="/apply?tab=kits" className="text-neon-400 underline">
                 Apply Kits
               </Link>{" "}
               page, then record what happened.

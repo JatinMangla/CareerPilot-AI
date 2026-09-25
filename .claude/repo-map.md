@@ -2,7 +2,7 @@
 
 <!-- GENERATED FILE. Do not edit by hand: node scripts/repo-map.mjs -->
 
-_85 source files · 15 pages · 11 API routes · 19 AI tasks · generated 2026-09-25_
+_86 source files · 14 pages · 11 API routes · 19 AI tasks · generated 2026-09-25_
 
 **Read this before exploring.** It is regenerated from the source, so it does not drift.
 For import relationships see [docs/dep-graph.md](../docs/dep-graph.md).
@@ -64,10 +64,8 @@ cross-device sync.
 |   |   |   `-- route.ts  (56)
 |   |   `-- state/
 |   |       `-- route.ts  (181)
-|   |-- auto-apply/
-|   |   `-- page.tsx  (605)
-|   |-- autopilot/
-|   |   `-- page.tsx  (864)
+|   |-- apply/
+|   |   `-- page.tsx  (83)
 |   |-- evolve/
 |   |   `-- page.tsx  (491)
 |   |-- github/
@@ -97,10 +95,13 @@ cross-device sync.
 |   |-- layout.tsx  (24)
 |   `-- page.tsx  (318)
 |-- components/   # shared client components
+|   |-- apply/
+|   |   |-- ApplyKits.tsx  (606)
+|   |   `-- AutoPilot.tsx  (865)
 |   |-- CopyButton.tsx  (42)
 |   |-- Pager.tsx  (123)
 |   |-- RunProgress.tsx  (27)
-|   |-- Shell.tsx  (154)
+|   |-- Shell.tsx  (153)
 |   |-- SyncProvider.tsx  (148)
 |   `-- UsageBanner.tsx  (43)
 |-- docs/   # generated documentation
@@ -163,7 +164,7 @@ cross-device sync.
 |-- CLAUDE.md
 |-- README.md
 |-- middleware.ts  (36)
-|-- next.config.mjs  (59)
+|-- next.config.mjs  (67)
 |-- package.json
 |-- postcss.config.mjs  (10)
 |-- tailwind.config.ts  (55)
@@ -175,8 +176,7 @@ cross-device sync.
 | URL | File | Lines |
 | --- | --- | --- |
 | `/` | [app/page.tsx](../app/page.tsx) | 318 |
-| `/auto-apply` | [app/auto-apply/page.tsx](../app/auto-apply/page.tsx) | 605 |
-| `/autopilot` | [app/autopilot/page.tsx](../app/autopilot/page.tsx) | 864 |
+| `/apply` | [app/apply/page.tsx](../app/apply/page.tsx) | 83 |
 | `/evolve` | [app/evolve/page.tsx](../app/evolve/page.tsx) | 491 |
 | `/github` | [app/github/page.tsx](../app/github/page.tsx) | 241 |
 | `/inbox` | [app/inbox/page.tsx](../app/inbox/page.tsx) | 554 |
@@ -224,9 +224,9 @@ up in [lib/prompts.ts](../lib/prompts.ts). `tier` picks the Gemini model chain i
 | `apply_tailor` | stream | deep | 32000 | — | `app/tailor/page.tsx` |
 | `find_jobs` | json | standard | 16000 | — | `app/jobs/page.tsx` |
 | `analyze_jobs` | json | standard | 16000 | 21600s | `app/jobs/page.tsx` |
-| `auto_tailor` | json | deep | 20000 | — | `app/autopilot/page.tsx` |
-| `merge_claims` | stream | deep | 20000 | — | `app/autopilot/page.tsx` |
-| `prepare_application` | json | standard | 8000 | — | `app/auto-apply/page.tsx` |
+| `auto_tailor` | json | deep | 20000 | — | `components/apply/AutoPilot.tsx` |
+| `merge_claims` | stream | deep | 20000 | — | `components/apply/AutoPilot.tsx` |
+| `prepare_application` | json | standard | 8000 | — | `components/apply/ApplyKits.tsx` |
 | `interview_turn` | stream | fast | 4000 | — | `app/interview/page.tsx` |
 | `interview_feedback` | stream | standard | 8000 | — | `app/interview/page.tsx` |
 | `practice_question` | json | standard | 8000 | — | `app/practice/page.tsx` |
@@ -251,9 +251,11 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | [components/CopyButton.tsx](../components/CopyButton.tsx) | 42 | CopyButton | 5 |
 | [components/Pager.tsx](../components/Pager.tsx) | 123 | Pager, usePaged | 6 |
 | [components/RunProgress.tsx](../components/RunProgress.tsx) | 27 | RunProgress | 4 |
-| [components/Shell.tsx](../components/Shell.tsx) | 154 | Shell | 1 |
+| [components/Shell.tsx](../components/Shell.tsx) | 153 | Shell | 1 |
 | [components/SyncProvider.tsx](../components/SyncProvider.tsx) | 148 | SyncBadge, SyncProvider | 1 |
 | [components/UsageBanner.tsx](../components/UsageBanner.tsx) | 43 | UsageBanner | 1 |
+| [components/apply/ApplyKits.tsx](../components/apply/ApplyKits.tsx) | 606 | ApplyKits | 1 |
+| [components/apply/AutoPilot.tsx](../components/apply/AutoPilot.tsx) | 865 | AutoPilot | 1 |
 | [lib/aiCache.ts](../lib/aiCache.ts) | 61 | cacheKey, readCache, writeCache | 1 |
 | [lib/aiClient.ts](../lib/aiClient.ts) | 205 | AiMeta, IncompleteStreamError, StreamOptions, TaskOptions, jsonTask, streamTask | 13 |
 | [lib/ats.ts](../lib/ats.ts) | 215 | AtsInfo, AtsKind, atsBadgeTone, detectAts, isVerifiedSource | 2 |
@@ -285,7 +287,7 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | [lib/types.ts](../lib/types.ts) | 351 | AutoTailorPlan, DismissedJob, ImprovementBrief, InboxCursor, InboxMessage, Job, MailCategory, OUTCOME_STAGES, +21 | 19 |
 | [lib/useCancellable.ts](../lib/useCancellable.ts) | 26 | useCancellable | 4 |
 | [middleware.ts](../middleware.ts) | 36 | config, middleware | 0 |
-| [next.config.mjs](../next.config.mjs) | 59 | — | 0 |
+| [next.config.mjs](../next.config.mjs) | 67 | — | 0 |
 | [postcss.config.mjs](../postcss.config.mjs) | 10 | — | 0 |
 | [tailwind.config.ts](../tailwind.config.ts) | 55 | — | 0 |
 | [tests/agentFields.test.mjs](../tests/agentFields.test.mjs) | 35 | — | 0 |

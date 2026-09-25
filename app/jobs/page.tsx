@@ -494,7 +494,7 @@ export default function JobsPage() {
           Read straight from each company&apos;s own Greenhouse / Lever / Ashby board —
           first-party listings, always current, and no account needed. These apply links
           are exactly what{" "}
-          <Link href="/autopilot" className="underline">
+          <Link href="/apply?tab=pilot" className="underline">
             Auto-Pilot
           </Link>{" "}
           can prepare and open for you.
@@ -622,10 +622,10 @@ export default function JobsPage() {
                 application for you; Auto-Apply builds a cover letter + screening answers.
               </p>
               <div className="flex gap-2">
-                <Link href="/autopilot" className="btn-primary">
+                <Link href="/apply?tab=pilot" className="btn-primary">
                   ✦ Auto-Pilot
                 </Link>
-                <Link href="/auto-apply" className="btn-secondary">
+                <Link href="/apply?tab=kits" className="btn-secondary">
                   ➤ Auto-Apply
                 </Link>
               </div>

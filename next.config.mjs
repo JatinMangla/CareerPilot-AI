@@ -44,6 +44,14 @@ const nextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  // Auto-Pilot and Apply Kits merged into /apply. Real HTTP redirects, so old
+  // links and bookmarks work before any JavaScript runs.
+  async redirects() {
+    return [
+      { source: "/autopilot", destination: "/apply?tab=pilot", permanent: false },
+      { source: "/auto-apply", destination: "/apply?tab=kits", permanent: false },
+    ];
+  },
   experimental: {
     serverComponentsExternalPackages: [
       "unpdf",

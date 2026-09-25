@@ -160,6 +160,14 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
   - This was done on 2026-09-24 and all 16 end-to-end checks passed: code lockout, single-use
     codes, per-IP limits, revocation, per-item merge, sticky removals, stale-value refusal.
   - The fake server is not committed; rebuild it from this description if needed.
+- **Browser checks without installing anything:** `agent/node_modules` already has Playwright.
+  1. Build via PowerShell.
+  2. Run `next start -p 3123`.
+  3. Load `playwright` with `createRequire("…/agent/package.json")`.
+  4. Log in through `POST /api/auth/login` (password from `.env.local`, never printed), then drive
+     pages. Pages render client-side behind `SyncProvider`, so wait for `main h1` or a role
+     before asserting.
+  - A plain curl of a page only ever shows the "Syncing your data…" loader.
 
 ## Gotchas that cost time
 
@@ -178,48 +186,61 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
 
 ## Open items (highest value first)
 
-Each of the first three needs the owner's go-ahead, not just more code.
+Both remaining items need an action only the owner can take. The Claude Code auto-mode
+safety check blocks Claude from doing them, even with the owner's verbal approval.
 
-1. **Next.js 14 → 16, which needs the owner's approval.** `npm audit` reports one critical
-   advisory (Next itself) and one high (postcss), and only a major upgrade fixes them. On
-   2026-09-25 the Claude Code auto-mode safety check blocked `npm install next@16 react@19`
-   as a production-affecting change, so it was not attempted. When the owner approves it, the
-   work is:
-   - Install `next@16`, `react@19`, `react-dom@19`, `@types/react@19` and `@types/react-dom@19`
-     (from PowerShell).
-   - Make every `cookies()` call `await cookies()`: the auth routes and `lib/session.ts`.
-   - Rename `middleware.ts` → `proxy.ts` (export `proxy`). This is deprecated rather than
-     removed, so it is optional.
-   - Move `experimental.serverComponentsExternalPackages` → top-level `serverExternalPackages`.
-   - Rebuild through PowerShell, and re-run the smoke scripts described under Verification
-     tooling.
-   - Mitigation until then: Vercel-hosted deployments are shielded from several of the listed
-     issues (middleware bypass, image optimizer), and the app uses no rewrites or image
-     remotePatterns.
-2. **Check the sync CAS script against the real Upstash, which also needs approval.** It is only
-   verified against the fake server. Checking it needs either production credentials
-   (`vercel env pull`) to write test keys, or live sync traffic while logs are being watched.
-   Hobby-plan runtime logs expire quickly, so on 2026-09-25 there was nothing to inspect.
-   - If `EVAL` fails in production, the route logs "[state] atomic write unavailable" and falls
-     back to unguarded writes that still bump revisions.
-3. **The owner should rotate `AUTH_PASSWORD` and the Resend key.** Both were exposed in earlier
-   chats or notes. This is a manual step in Vercel (use the `cmd /c` file pipe from CLAUDE.md)
-   and in the Resend dashboard.
-4. **Whether to merge Auto-Apply (`/auto-apply`) and Auto-Pilot (`/autopilot`) is the owner's
-   product decision.** The duplicated mechanics are now shared: `useCancellable`,
-   `RunProgress`, `CopyButton`, `mapPool` with a signal, and read-modify-write updaters.
-   What is left is the product difference:
-   - Auto-Pilot tailors the resume per job and only takes verified sources.
-   - Apply Kits makes a cover letter and screening answers for any job, portals included, on
-     a cheaper tier.
-   - Merging them would remove a page the owner uses.
-5. Security-headers CSP still allows `'unsafe-inline'` and `'unsafe-eval'`. `@react-pdf` needs
-   eval, and a nonce would force dynamic rendering. It is documented in `next.config.mjs`.
-   This is a deliberate trade-off, not a defect.
+1. **Next.js 14 → 16.** `npm audit` reports one critical advisory (Next itself) and one high
+   (postcss), and only a major upgrade fixes them.
+   - **Why it's still open:** on 2026-09-25 the auto-mode check blocked
+     `npm install next@16 react@19` twice ("Production Deploy"), including after the owner said
+     "do all things". It needs either the owner running the install, or a Bash permission rule.
+   - **Start by installing** (from PowerShell, in the repo):
+     `npm install next@16.3.6 react@^19 react-dom@^19` and
+     `npm install -D @types/react@^19 @types/react-dom@^19`.
+   - **Then a Claude session does:**
+     - Change every `cookies()` to `await cookies()`: the auth routes and `lib/session.ts`.
+     - Move `experimental.serverComponentsExternalPackages` → top-level `serverExternalPackages`.
+     - Optionally rename `middleware.ts` → `proxy.ts`.
+     - Rebuild via PowerShell.
+     - Re-run the browser smoke test described under Verification tooling.
+   - **Mitigation until then:** Vercel-hosted deployments are shielded from several of the
+     listed issues, and the app uses no rewrites or image remotePatterns.
+2. **Rotate `AUTH_PASSWORD` and the Resend key.** Both were exposed in earlier chats or notes.
+   - **Password:** a new random password is already generated in
+     `C:\Users\jmangla.AAPNAINFOTECH\careerpilot-new-password.txt`, in the home folder, which
+     OneDrive does not sync.
+     - The auto-mode check blocked writing it to Vercel ("Secret-Store Writes").
+     - The owner runs, from the repo:
+       - `cmd /c "npx vercel env rm AUTH_PASSWORD production -y"`
+       - `cmd /c "npx vercel env add AUTH_PASSWORD production < C:\Users\jmangla.AAPNAINFOTECH\careerpilot-new-password.txt"`
+     - Then redeploy: push any commit, or run `npx vercel --prod`. Env changes apply only to new
+       deployments.
+     - Then store the password somewhere safe and delete the file.
+   - **Resend:** create a new key in the Resend dashboard, then replace `RESEND_API_KEY` the same
+     way.
+3. Security-headers CSP still allows `'unsafe-inline'` and `'unsafe-eval'`. `@react-pdf` needs
+   eval, and a nonce would force dynamic rendering. This is a deliberate trade-off.
+   - On 2026-09-25 PDF export was verified working under this CSP in a real browser.
 
 ---
 
 ## Change log
+
+### 2026-09-25 (later): Apply page merge, live sync check
+
+- **Auto-Pilot and Apply Kits merged into one page, `/apply`,** with two tabs. The tab lives in
+  `?tab=pilot|kits`.
+  - The flows now live in `components/apply/AutoPilot.tsx` and `components/apply/ApplyKits.tsx`.
+  - The sidebar has one "Apply" entry.
+  - `/autopilot` and `/auto-apply` are HTTP 307 redirects, set in `next.config.mjs` `redirects()`.
+- **Sync compare-and-set verified on the production Upstash:** 6 of 6 checks passed, run on
+  throwaway `careerpilot:test:*` keys that were deleted afterwards. The pulled credentials file
+  was deleted after use.
+- **Browser-tested with Playwright** (headless Chromium from `agent/node_modules`):
+  - all 13 pages render with no runtime errors;
+  - the Apply tabs and redirects work;
+  - PDF export works under the CSP;
+  - the tailor draft survives navigation.
 
 ### 2026-09-25: follow-up on the open items
 

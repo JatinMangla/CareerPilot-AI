@@ -49,7 +49,8 @@ function portalSearchUrl(portal: string, job: Job): string {
   }
 }
 
-export default function AutoApplyPage() {
+/** The Apply Kits tab of /apply: cover letter + screening answers for any job, portals included. */
+export default function ApplyKits() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [apps, setApps] = useState<PreparedApplication[]>([]);
 
@@ -245,7 +246,7 @@ export default function AutoApplyPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="h1">Auto-Apply Pipeline</h1>
+        <h2 className="h2">Apply Kits</h2>
         <p className="muted mt-1">
           The AI prepares each application end-to-end — tailored cover letter, resume
           bullets, screening answers — then hands you one-click submission links.

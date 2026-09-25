@@ -17,7 +17,8 @@ import RunProgress from "@/components/RunProgress";
 
 const PAGE_SIZE = 15;
 
-export default function AutoPilotPage() {
+/** The Auto-Pilot tab of /apply: per-job tailored resume, approval gate, open in tabs. */
+export default function AutoPilot() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [queue, setQueue] = useState<QueuedApplication[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -388,7 +389,7 @@ export default function AutoPilotPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="h1">Auto-Pilot</h1>
+        <h2 className="h2">Auto-Pilot</h2>
         <p className="muted mt-1">
           AI tailors your resume per job, asks you only when it would need to claim
           something new, exports a ready-to-paste kit, then opens every application in
@@ -422,7 +423,7 @@ export default function AutoPilotPage() {
         you haven&apos;t seen and no account is ever at risk. Applying direct on the
         company&apos;s own ATS still beats a portal: far fewer applicants, and it lands
         straight in the employer&apos;s system rather than in{" "}
-        <Link href="/auto-apply" className="underline">
+        <Link href="/apply?tab=kits" className="underline">
           a queue behind ten thousand others
         </Link>
         .
