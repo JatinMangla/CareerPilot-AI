@@ -9,6 +9,8 @@ import { quota } from "@/lib/quota";
 import { isVerifiedSource } from "@/lib/ats";
 import { isBlockedListing } from "@/lib/jobFilters";
 import { safeHref } from "@/lib/safeUrl";
+import { useCancellable } from "@/lib/useCancellable";
+import RunProgress from "@/components/RunProgress";
 import { roleSuggestions, searchVariants } from "@/lib/roleSuggestions";
 import { Pager, usePaged } from "@/components/Pager";
 import { quickScore } from "@/lib/jobScore";
@@ -111,7 +113,8 @@ async function analyzeJobs(
   targets: Job[],
   resumeText: string,
   profile: Profile,
-  onProgress: (done: number, total: number) => void
+  onProgress: (done: number, total: number) => void,
+  signal?: AbortSignal
 ): Promise<{ analyzed: Job[]; failed: number; batches: number; firstError: string }> {
   const batches: Job[][] = [];
   for (let i = 0; i < targets.length; i += BATCH) batches.push(targets.slice(i, i + BATCH));
@@ -119,7 +122,7 @@ async function analyzeJobs(
   const outcomes = await mapPool(
     batches,
     AI_CONCURRENCY,
-    (batch) =>
+    (batch, _i, sig) =>
       jsonTask<{ jobs: AnalysisRow[] }>("analyze_jobs", {
         jobs: batch.map((j) => ({
           id: j.id,
@@ -132,8 +135,9 @@ async function analyzeJobs(
         })),
         resume: resumeText,
         profile,
-      }),
-    onProgress
+      }, { signal: sig }),
+    onProgress,
+    signal
   );
 
   const analyzed: Job[] = [];
@@ -170,6 +174,7 @@ export default function JobsPage() {
   const [focus, setFocus] = useState<Focus>("boards");
   const [depth, setDepth] = useState(60);
   const [busy, setBusy] = useState(false);
+  const run = useCancellable();
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -274,7 +279,9 @@ export default function JobsPage() {
       );
 
       const result = await analyzeJobs(top, resume.text, profile, (done, total) =>
-        setStatus(`Analysing the best ${top.length} of ${quick.length} listings… ${done}/${total} batches`)
+        setStatus(`Analysing the best ${top.length} of ${quick.length} listings… ${done}/${total} batches`),
+        // Stopping keeps every listing: the ones not yet analysed keep their quick score.
+        run.start()
       );
       const byId = new Map(result.analyzed.map((j) => [j.id, j]));
       const all = quick.map((j) => byId.get(j.id) ?? j);
@@ -314,7 +321,8 @@ export default function JobsPage() {
     setBusy(true);
     try {
       const result = await analyzeJobs(targets, resume.text, store.getProfile(), (done, total) =>
-        setStatus(`Analysing ${targets.length} more… ${done}/${total} batches`)
+        setStatus(`Analysing ${targets.length} more… ${done}/${total} batches`),
+        run.start()
       );
       const { jobs: merged } = store.addJobs(result.analyzed);
       store.bumpStat("jobsAnalyzed", result.analyzed.length);
@@ -402,8 +410,8 @@ export default function JobsPage() {
 
       <div className="card-pad flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[200px]">
-          <label className="label">Role / keywords</label>
-          <input
+          <label className="label" htmlFor="jobs-role-keywords">Role / keywords</label>
+          <input id="jobs-role-keywords"
             className="input"
             list="role-suggestions"
             value={query}
@@ -434,12 +442,12 @@ export default function JobsPage() {
           </div>
         </div>
         <div className="flex-1 min-w-[160px]">
-          <label className="label">Location</label>
-          <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} />
+          <label className="label" htmlFor="jobs-location">Location</label>
+          <input id="jobs-location" className="input" value={location} onChange={(e) => setLocation(e.target.value)} />
         </div>
         <div className="min-w-[120px]">
-          <label className="label">How many</label>
-          <select
+          <label className="label" htmlFor="jobs-how-many">How many</label>
+          <select id="jobs-how-many"
             className="input"
             value={depth}
             onChange={(e) => setDepth(Number(e.target.value))}
@@ -460,6 +468,7 @@ export default function JobsPage() {
             <button
               key={o.k}
               onClick={() => setFocus(o.k)}
+              aria-pressed={focus === o.k}
               title={o.hint}
               className={`rounded-full px-3.5 py-1.5 text-xs font-semibold border transition ${
                 focus === o.k
@@ -516,7 +525,7 @@ export default function JobsPage() {
           to enable matching.
         </div>
       )}
-      {status && <div className="card-pad text-sm text-ink-300 animate-pulse">{status}</div>}
+      <RunProgress text={status} onStop={busy ? run.cancel : undefined} />
       {error && (
         <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
           {error}

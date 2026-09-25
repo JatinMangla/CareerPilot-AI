@@ -9,6 +9,9 @@ import { isBlockedListing } from "@/lib/jobFilters";
 import { openTabs, blockedHint, TAB_BATCH } from "@/lib/openTabs";
 import { safeHref } from "@/lib/safeUrl";
 import { applicationStamp } from "@/lib/outcomes";
+import { copyText } from "@/lib/clipboard";
+import { useCancellable } from "@/lib/useCancellable";
+import RunProgress from "@/components/RunProgress";
 import { Pager, usePaged } from "@/components/Pager";
 import { OUTCOME_STAGES, type Job, type OutcomeStage, type PreparedApplication, type Profile } from "@/lib/types";
 
@@ -64,6 +67,7 @@ export default function AutoApplyPage() {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const run = useCancellable();
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -109,16 +113,18 @@ export default function AutoApplyPage() {
        * them. A failure no longer abandons the rest either: mapPool collects
        * per-job errors instead of throwing out of the loop.
        */
+      const signal = run.start();
       const outcomes = await mapPool(
         targets,
         AI_CONCURRENCY,
-        (job) =>
+        (job, _i, sig) =>
           jsonTask<{
             coverLetter: string;
             tailoredHighlights: string[];
             screeningAnswers: { question: string; answer: string }[];
-          }>("prepare_application", { resume: resume.text, job, portal, profile }),
-        (done, total) => setProgress(`Preparing applications… ${done}/${total} done`)
+          }>("prepare_application", { resume: resume.text, job, portal, profile }, { signal: sig }),
+        (done, total) => setProgress(`Preparing applications… ${done}/${total} done`),
+        signal
       );
 
       for (const { item: job, value: prep } of outcomes) {
@@ -318,7 +324,7 @@ export default function AutoApplyPage() {
             </button>
           </div>
         )}
-        {progress && <p className="text-sm text-neon-400 animate-pulse">{progress}</p>}
+        <RunProgress text={progress} onStop={busy ? run.cancel : undefined} />
         {unprepared.length === 0 && (
           <p className="text-sm text-ink-400">
             No unprepared jobs in your list.{" "}
@@ -345,6 +351,7 @@ export default function AutoApplyPage() {
               <button
                 className="text-[11px] text-coral-400 hover:underline"
                 title="Hide this job for good"
+                aria-label={`Hide ${job.title} at ${job.company} for good`}
                 onClick={(e) => {
                   e.preventDefault();
                   dismissJob(job);
@@ -418,10 +425,12 @@ function AppCard({
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState("");
 
-  function copy(label: string, text: string) {
-    navigator.clipboard.writeText(text);
-    setCopied(label);
-    setTimeout(() => setCopied(""), 1500);
+  async function copy(label: string, text: string) {
+    // Reports a failed copy instead of claiming success: an empty paste into an
+    // application form is worse than a visible error.
+    const ok = await copyText(text);
+    setCopied(ok ? label : `failed:${label}`);
+    setTimeout(() => setCopied(""), ok ? 1500 : 3000);
   }
 
   return (
@@ -485,6 +494,7 @@ function AppCard({
               <button
                 key={o}
                 onClick={() => onOutcome(o)}
+                aria-pressed={app.outcome === o}
                 className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border capitalize transition ${
                   app.outcome === o
                     ? o === "offer"
@@ -536,7 +546,7 @@ function AppCard({
                   className="text-xs text-neon-400 hover:underline"
                   onClick={() => copy("cover", app.coverLetter)}
                 >
-                  {copied === "cover" ? "Copied ✓" : "Copy"}
+                  {copied === "cover" ? "Copied ✓" : copied === "failed:cover" ? "Copy failed" : "Copy"}
                 </button>
               </div>
             </div>
@@ -554,7 +564,7 @@ function AppCard({
                 className="text-xs text-neon-400 hover:underline"
                 onClick={() => copy("bullets", app.tailoredHighlights.join("\n"))}
               >
-                {copied === "bullets" ? "Copied ✓" : "Copy all"}
+                {copied === "bullets" ? "Copied ✓" : copied === "failed:bullets" ? "Copy failed" : "Copy all"}
               </button>
             </div>
             <ul className="space-y-1.5 bg-ink-850 rounded-xl p-3">
@@ -579,7 +589,7 @@ function AppCard({
                       className="text-xs text-neon-400 hover:underline shrink-0"
                       onClick={() => copy(`qa${i}`, qa.answer)}
                     >
-                      {copied === `qa${i}` ? "✓" : "Copy"}
+                      {copied === `qa${i}` ? "✓" : copied === `failed:qa${i}` ? "failed" : "Copy"}
                     </button>
                   </div>
                   <p className="text-xs text-ink-300 mt-1 leading-relaxed">{qa.answer}</p>

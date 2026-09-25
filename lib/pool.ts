@@ -17,6 +17,8 @@ export interface PoolOutcome<T, R> {
   index: number;
   value?: R;
   error?: Error;
+  /** Never started because the run was cancelled. */
+  skipped?: boolean;
 }
 
 /** How many AI calls may be in flight at once. See the note above before raising. */
@@ -32,12 +34,18 @@ export const AI_CONCURRENCY = 3;
  * `onSettled` fires as each item finishes, for progress display. It reports a
  * completed COUNT, not a position: with overlapping calls, "item 4 of 10" is
  * meaningless but "4 of 10 done" is not.
+ *
+ * `signal` makes a run cancellable: nothing new starts once it aborts, and the
+ * signal is handed to `fn` so in-flight calls can stop too. Items that never ran
+ * come back with `skipped: true`. Without this a cancelled 25-job run kept
+ * spending the day's free quota after you had moved on.
  */
 export async function mapPool<T, R>(
   items: readonly T[],
   limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-  onSettled?: (done: number, total: number) => void
+  fn: (item: T, index: number, signal?: AbortSignal) => Promise<R>,
+  onSettled?: (done: number, total: number) => void,
+  signal?: AbortSignal
 ): Promise<PoolOutcome<T, R>[]> {
   const total = items.length;
   const results: PoolOutcome<T, R>[] = new Array(total);
@@ -48,9 +56,20 @@ export async function mapPool<T, R>(
     for (;;) {
       const index = next++;
       if (index >= total) return;
+      if (signal?.aborted) {
+        results[index] = { item: items[index], index, skipped: true };
+        continue;
+      }
       try {
-        results[index] = { item: items[index], index, value: await fn(items[index], index) };
+        results[index] = { item: items[index], index, value: await fn(items[index], index, signal) };
       } catch (err) {
+        if (signal?.aborted) {
+          // Stopped by the cancel, not failed — the caller must not record an error.
+          results[index] = { item: items[index], index, skipped: true };
+          done++;
+          onSettled?.(done, total);
+          continue;
+        }
         results[index] = {
           item: items[index],
           index,

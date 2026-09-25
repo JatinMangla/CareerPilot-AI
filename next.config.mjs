@@ -46,7 +46,7 @@ const nextConfig = {
   },
   experimental: {
     serverComponentsExternalPackages: [
-      "pdf-parse",
+      "unpdf",
       "mammoth",
       "imapflow",
       "mailparser",

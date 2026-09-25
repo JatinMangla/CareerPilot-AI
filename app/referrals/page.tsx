@@ -7,6 +7,7 @@ import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { Pager, usePaged } from "@/components/Pager";
 import type { Job, ReferralPlan, ReferralRecord, ReferralStage } from "@/lib/types";
+import CopyButton from "@/components/CopyButton";
 
 const STAGES: { key: ReferralStage; label: string; tone: string }[] = [
   { key: "planned", label: "Planned", tone: "badge-blue" },
@@ -195,6 +196,7 @@ export default function ReferralsPage() {
                   <button
                     key={s.key}
                     onClick={() => setStage(rec.id, s.key)}
+                    aria-pressed={rec.stage === s.key}
                     className={`rounded-full px-3 py-1 text-[11px] font-semibold border transition ${
                       rec.stage === s.key
                         ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
@@ -302,21 +304,11 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 }
 
 function Copyable({ title, text }: { title: string; text: string }) {
-  const [copied, setCopied] = useState(false);
   return (
     <div>
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <h4 className="text-xs font-bold uppercase tracking-wider text-ink-300">{title}</h4>
-        <button
-          className="text-xs text-neon-400 hover:underline shrink-0"
-          onClick={() => {
-            navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          }}
-        >
-          {copied ? "Copied ✓" : "Copy"}
-        </button>
+        <CopyButton text={text} className="text-xs text-neon-400 hover:underline shrink-0" />
       </div>
       <p className="text-xs text-ink-200 leading-relaxed bg-ink-850 rounded-xl p-3 whitespace-pre-wrap">
         {text}

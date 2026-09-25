@@ -8,6 +8,8 @@ import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { Pager, usePaged } from "@/components/Pager";
 import { isTransactional, trimForStorage } from "@/lib/inboxFilters";
 import { applicationsAt, recordOutcome } from "@/lib/outcomes";
+import { useCancellable } from "@/lib/useCancellable";
+import RunProgress from "@/components/RunProgress";
 import type { InboxCursor, InboxMessage, MailCategory, OutcomeStage } from "@/lib/types";
 
 const PAGE_SIZE = 20;
@@ -44,6 +46,7 @@ export default function InboxPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("action");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const run = useCancellable();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [openUid, setOpenUid] = useState<string | null>(null);
@@ -62,7 +65,7 @@ export default function InboxPage() {
    * mail that had never been stored, and that mail could never be fetched again.
    * Storing first makes an interruption cost a repeat, not a hole.
    */
-  async function commitPage(page: InboxMessage[], cursor: InboxCursor) {
+  async function commitPage(page: InboxMessage[], cursor: InboxCursor, signal?: AbortSignal) {
     const profile = store.getProfile();
     const classified: Record<string, any> = {};
     const BATCH = 12;
@@ -95,7 +98,7 @@ export default function InboxPage() {
     const outcomes = await mapPool(
       batches,
       AI_CONCURRENCY,
-      (slice) =>
+      (slice, _i, sig) =>
         jsonTask<{ results: any[] }>("classify_inbox", {
           profile,
           emails: slice.map((m) => ({
@@ -105,15 +108,18 @@ export default function InboxPage() {
             date: m.date,
             snippet: m.snippet,
           })),
-        }),
+        }, { signal: sig }),
       (done) =>
-        setProgress(`Sorting job mail… ${Math.min(done * BATCH, toClassify.length)}/${toClassify.length}`)
+        setProgress(`Sorting job mail… ${Math.min(done * BATCH, toClassify.length)}/${toClassify.length}`),
+      signal
     );
 
     for (const outcome of outcomes) {
       for (const r of outcome.value?.results || []) classified[r.uid] = r;
     }
-    const failedBatches = outcomes.filter((o) => o.error);
+    // A batch stopped by Cancel counts as unfinished: the cursor must not move
+    // past mail that was stored but never sorted.
+    const failedBatches = outcomes.filter((o) => o.error || o.skipped);
 
     const now = new Date().toISOString();
     const merged: InboxMessage[] = page.map((m) => {
@@ -165,6 +171,7 @@ export default function InboxPage() {
     setNotice("");
     setBusy(true);
     setProgress("Connecting to Gmail…");
+    const signal = run.start();
 
     let fetched = 0;
     let classifyError = "";
@@ -177,10 +184,12 @@ export default function InboxPage() {
       const MAX_ROUNDS = 8; // up to ~640 emails per click
 
       for (let round = 0; round < MAX_ROUNDS; round++) {
+        if (signal.aborted) break;
         const res = await fetch("/api/inbox/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ afterUid, limit: 80, days }),
+          signal,
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -216,7 +225,7 @@ export default function InboxPage() {
         if (page.length) {
           fetched += page.length;
           setProgress(`Reading ${page.length} emails…`);
-          const err = await commitPage(page, { uid: afterUid, uidValidity: validity });
+          const err = await commitPage(page, { uid: afterUid, uidValidity: validity }, signal);
           if (err) classifyError = err;
         } else {
           store.setInboxCursor({ uid: afterUid, uidValidity: validity });
@@ -236,10 +245,15 @@ export default function InboxPage() {
       }
 
       const parts = [`Synced ${fetched} email${fetched === 1 ? "" : "s"}.`];
+      if (signal.aborted) parts.push("Stopped — click Sync again to continue from where it left off.");
       if (leftover > 0) parts.push(`${leftover} older ones are still queued — click Sync again to continue.`);
       setNotice(parts.join(" "));
       if (classifyError) setError(`Some mail couldn't be sorted: ${classifyError}`);
     } catch (err: any) {
+      if (signal.aborted) {
+        setNotice(`Stopped after ${fetched} emails — click Sync again to continue.`);
+        return;
+      }
       setError(
         fetched
           ? `Stopped after ${fetched} emails: ${err.message}. Click Sync again to resume.`
@@ -309,7 +323,7 @@ export default function InboxPage() {
           <button className="btn-primary" onClick={() => sync()} disabled={busy}>
             {busy ? "Syncing…" : lastSync ? "⟳ Sync new mail" : "⟳ Sync my inbox"}
           </button>
-          <select
+          <select aria-label="Rescan window"
             className="input w-auto py-2 text-xs"
             defaultValue=""
             disabled={busy}
@@ -334,11 +348,7 @@ export default function InboxPage() {
         {hidden > 0 && <span>· {hidden} non-job emails hidden</span>}
       </div>
 
-      {progress && (
-        <div className="text-sm text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3 animate-pulse">
-          {progress}
-        </div>
-      )}
+      <RunProgress text={progress} onStop={busy ? run.cancel : undefined} />
       {notice && !busy && (
         <div className="text-sm text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3 flex items-start gap-3">
           <span className="flex-1">{notice}</span>
@@ -377,6 +387,7 @@ export default function InboxPage() {
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
+                aria-pressed={tab === t.key}
                 title={t.hint}
                 className={`rounded-full px-4 py-1.5 text-xs font-semibold border transition ${
                   tab === t.key

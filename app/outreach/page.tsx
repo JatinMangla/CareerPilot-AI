@@ -6,6 +6,7 @@ import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { Pager, usePaged } from "@/components/Pager";
 import type { SentEmail } from "@/lib/types";
+import CopyButton from "@/components/CopyButton";
 
 type Mode = "new" | "reply";
 
@@ -207,6 +208,7 @@ export default function OutreachPage() {
               <button
                 key={m}
                 onClick={() => setMode(m)}
+                aria-pressed={mode === m}
                 className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold border transition ${
                   mode === m
                     ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
@@ -220,8 +222,8 @@ export default function OutreachPage() {
 
           <div className="grid sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
-              <label className="label">HR / hiring manager email *</label>
-              <input
+              <label className="label" htmlFor="outreach-hr-hiring-manager-email">HR / hiring manager email *</label>
+              <input id="outreach-hr-hiring-manager-email"
                 className="input"
                 type="email"
                 placeholder="hr@company.com"
@@ -230,8 +232,8 @@ export default function OutreachPage() {
               />
             </div>
             <div>
-              <label className="label">Role (post)</label>
-              <input
+              <label className="label" htmlFor="outreach-role-post">Role (post)</label>
+              <input id="outreach-role-post"
                 className="input"
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
@@ -239,16 +241,16 @@ export default function OutreachPage() {
               />
             </div>
             <div>
-              <label className="label">Company (optional)</label>
-              <input
+              <label className="label" htmlFor="outreach-company-optional">Company (optional)</label>
+              <input id="outreach-company-optional"
                 className="input"
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="label">CC (optional)</label>
-              <input
+              <label className="label" htmlFor="outreach-cc-optional">CC (optional)</label>
+              <input id="outreach-cc-optional"
                 className="input"
                 type="email"
                 value={cc}
@@ -263,7 +265,7 @@ export default function OutreachPage() {
                 ? "Paste HR's message (so the AI answers everything they asked)"
                 : "Job description or any context (optional)"}
             </label>
-            <textarea
+            <textarea aria-label="Context: job description or their email"
               className="input min-h-[150px] resize-y"
               placeholder={
                 mode === "reply"
@@ -276,8 +278,8 @@ export default function OutreachPage() {
           </div>
 
           <div>
-            <label className="label">Tone</label>
-            <select className="input" value={tone} onChange={(e) => setTone(e.target.value)}>
+            <label className="label" htmlFor="outreach-tone">Tone</label>
+            <select id="outreach-tone" className="input" value={tone} onChange={(e) => setTone(e.target.value)}>
               <option>professional and direct</option>
               <option>warm and personable</option>
               <option>confident and senior</option>
@@ -311,8 +313,8 @@ export default function OutreachPage() {
         <div className="card-pad space-y-4">
           <h2 className="h2">Draft</h2>
           <div>
-            <label className="label">Subject</label>
-            <input
+            <label className="label" htmlFor="outreach-subject">Subject</label>
+            <input id="outreach-subject"
               className="input"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
@@ -320,8 +322,8 @@ export default function OutreachPage() {
             />
           </div>
           <div>
-            <label className="label">Body — edit anything before sending</label>
-            <textarea
+            <label className="label" htmlFor="outreach-body-edit-anything-before-sendin">Body — edit anything before sending</label>
+            <textarea id="outreach-body-edit-anything-before-sendin"
               className="input min-h-[300px] resize-y text-[13px] leading-relaxed"
               value={body}
               onChange={(e) => setBody(e.target.value)}
@@ -353,13 +355,7 @@ export default function OutreachPage() {
             >
               {busy === "send" ? "Sending…" : "➤ Send from my Gmail"}
             </button>
-            <button
-              className="btn-secondary"
-              onClick={() => navigator.clipboard.writeText(`${subject}\n\n${body}`)}
-              disabled={!body.trim()}
-            >
-              Copy
-            </button>
+            <CopyButton text={`${subject}\n\n${body}`} disabled={!body.trim()} />
           </div>
           <p className="text-[11px] text-ink-400 leading-relaxed">
             Sends via Gmail SMTP as{" "}

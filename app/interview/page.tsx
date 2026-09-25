@@ -10,6 +10,31 @@ interface Turn {
   text: string;
 }
 
+/**
+ * The transcript survives leaving the page. It used to live only in React
+ * state, so switching tabs mid-interview threw the whole session away.
+ * This device only — it is practice, not something to sync.
+ */
+const SESSION_KEY = "cp_interview_session";
+
+function loadSession(): { mode: Mode; turns: Turn[]; feedback: string } | null {
+  try {
+    const raw = window.localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(mode: Mode | null, turns: Turn[], feedback: string) {
+  try {
+    if (!mode || !turns.length) window.localStorage.removeItem(SESSION_KEY);
+    else window.localStorage.setItem(SESSION_KEY, JSON.stringify({ mode, turns, feedback }));
+  } catch {
+    /* storage full or blocked — the interview still works, it just won't resume */
+  }
+}
+
 export default function InterviewPage() {
   const [mode, setMode] = useState<Mode | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -24,6 +49,27 @@ export default function InterviewPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const recogRef = useRef<any>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  /** The turn in flight — "New interview" aborts it so it can't write into the next session. */
+  const turnAbort = useRef<AbortController | null>(null);
+  /** Read at speak time: the state value was captured when the turn started, so
+   *  switching voice off mid-answer still spoke. */
+  const voiceRef = useRef(true);
+  const starting = useRef(false);
+
+  useEffect(() => {
+    const saved = loadSession();
+    if (saved?.turns?.length) {
+      setMode(saved.mode);
+      setTurns(saved.turns);
+      setFeedback(saved.feedback || "");
+      if (saved.mode === "video") setCamError("Camera is off after leaving the page — start a new video interview to turn it back on.");
+    }
+  }, []);
+
+  useEffect(() => {
+    // Only settled turns are saved; the "…" placeholder is not a turn.
+    if (!busy) saveSession(mode, turns, feedback);
+  }, [mode, turns, feedback, busy]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -31,6 +77,7 @@ export default function InterviewPage() {
 
   useEffect(() => {
     return () => {
+      turnAbort.current?.abort();
       streamRef.current?.getTracks().forEach((t) => t.stop());
       window.speechSynthesis?.cancel();
       recogRef.current?.stop?.();
@@ -38,14 +85,19 @@ export default function InterviewPage() {
   }, []);
 
   async function start(m: Mode) {
+    // A double click started two interviews at once.
+    if (starting.current || busy) return;
     const resume = store.getResume();
     if (!resume?.text) return setError("Add your resume first — the interviewer reads it.");
+    starting.current = true;
     setError("");
     setMode(m);
     setTurns([]);
     setFeedback("");
 
     if (m === "video") {
+      // A second start used to open a new camera stream without closing the first.
+      streamRef.current?.getTracks().forEach((t) => t.stop());
       try {
         const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         streamRef.current = s;
@@ -56,11 +108,15 @@ export default function InterviewPage() {
         setCamError("Camera/mic access denied — continuing without video preview.");
       }
     }
-    await aiTurn([], m);
+    try {
+      await aiTurn([], m);
+    } finally {
+      starting.current = false;
+    }
   }
 
   function speak(text: string) {
-    if (!voiceOn || typeof window === "undefined" || !window.speechSynthesis) return;
+    if (!voiceRef.current || typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.02;
@@ -76,26 +132,36 @@ export default function InterviewPage() {
     const stage =
       history.length < 4 ? "start (warm-up)" : history.length < 10 ? "middle (technical)" : "late (deep/scenario)";
     let acc = "";
+    turnAbort.current?.abort();
+    const ctrl = new AbortController();
+    turnAbort.current = ctrl;
     setTurns([...history, { role: "ai", text: "…" }]);
     try {
       acc = await streamTask(
         "interview_turn",
         { mode: m, history: historyText, resume: resume.text, stage, profile: store.getProfile() },
-        (full) => setTurns([...history, { role: "ai", text: full }]),
-        // Half a question is still a question; nothing here gets saved.
-        { allowIncomplete: true }
+        (full) => {
+          if (!ctrl.signal.aborted) setTurns([...history, { role: "ai", text: full }]);
+        },
+        // Half a question is still a question; this is practice, not a document.
+        { allowIncomplete: true, signal: ctrl.signal }
       );
-      speak(acc);
+      if (!ctrl.signal.aborted) speak(acc);
     } catch (err: any) {
+      if (ctrl.signal.aborted) return;
       setError(err.message);
       setTurns(history);
     } finally {
-      setBusy(false);
+      if (turnAbort.current === ctrl) setBusy(false);
     }
   }
 
   async function submitAnswer() {
     if (!input.trim() || busy || !mode) return;
+    // Stop listening first: the recogniser kept running and typed the answer
+    // just sent back into the box.
+    recogRef.current?.stop?.();
+    setListening(false);
     const history: Turn[] = [...turns, { role: "you", text: input.trim() }];
     setInput("");
     setTurns(history);
@@ -159,6 +225,10 @@ export default function InterviewPage() {
   }
 
   function reset() {
+    turnAbort.current?.abort();
+    setBusy(false);
+    recogRef.current?.stop?.();
+    setListening(false);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     window.speechSynthesis?.cancel();
@@ -214,7 +284,13 @@ export default function InterviewPage() {
         <div className="flex gap-2">
           <button
             className="btn-secondary text-xs"
-            onClick={() => setVoiceOn(!voiceOn)}
+            onClick={() => {
+              const next = !voiceOn;
+              voiceRef.current = next;
+              setVoiceOn(next);
+              if (!next) window.speechSynthesis?.cancel();
+            }}
+            aria-pressed={voiceOn}
           >
             Voice {voiceOn ? "on 🔊" : "off 🔇"}
           </button>
@@ -288,7 +364,7 @@ export default function InterviewPage() {
           {/* Answer box */}
           {!feedback && (
             <div className="card p-4 space-y-3">
-              <textarea
+              <textarea aria-label="Your answer"
                 className="input min-h-[90px] resize-y"
                 placeholder={
                   mode === "text"

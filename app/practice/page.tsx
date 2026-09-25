@@ -29,6 +29,15 @@ export default function PracticePage() {
   const [showOptimal, setShowOptimal] = useState(false);
 
   async function newQuestion() {
+    if (busy) return;
+    // A new question replaces the editor, so ask before discarding real work.
+    if (
+      q &&
+      code.trim() &&
+      code !== q.starterCode &&
+      !window.confirm("Replace your current solution with a new question?")
+    )
+      return;
     setError("");
     setBusy("question");
     setReview(null);
@@ -53,7 +62,9 @@ export default function PracticePage() {
   }
 
   async function submit() {
-    if (!q || !code.trim()) return;
+    // One call at a time: a review landing after "Next question" was pinned to
+    // the new question.
+    if (busy || !q || !code.trim()) return;
     setError("");
     setBusy("review");
     setShowOptimal(false);
@@ -84,16 +95,16 @@ export default function PracticePage() {
 
       <div className="card-pad flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[220px]">
-          <label className="label">Topic</label>
-          <select className="input" value={topic} onChange={(e) => setTopic(e.target.value)}>
+          <label className="label" htmlFor="practice-topic">Topic</label>
+          <select id="practice-topic" className="input" value={topic} onChange={(e) => setTopic(e.target.value)}>
             {TOPICS.map((t) => (
               <option key={t}>{t}</option>
             ))}
           </select>
         </div>
         <div>
-          <label className="label">Difficulty</label>
-          <select
+          <label className="label" htmlFor="practice-difficulty">Difficulty</label>
+          <select id="practice-difficulty"
             className="input"
             value={difficulty}
             onChange={(e) => setDifficulty(e.target.value as any)}
@@ -103,7 +114,7 @@ export default function PracticePage() {
             <option>Hard</option>
           </select>
         </div>
-        <button className="btn-primary" onClick={newQuestion} disabled={busy === "question"}>
+        <button className="btn-primary" onClick={newQuestion} disabled={!!busy}>
           {busy === "question" ? "Generating…" : q ? "Next question" : "{} Get a question"}
         </button>
         <div className="w-full flex items-center gap-2 pt-1">
@@ -115,6 +126,7 @@ export default function PracticePage() {
             <button
               key={o.k}
               onClick={() => setFormat(o.k)}
+              aria-pressed={format === o.k}
               className={`rounded-full px-3.5 py-1.5 text-xs font-semibold border transition ${
                 format === o.k
                   ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
@@ -203,13 +215,13 @@ export default function PracticePage() {
           {/* Solution editor */}
           <div className="card-pad space-y-4">
             <h2 className="h2">Your solution</h2>
-            <textarea
+            <textarea aria-label="Your solution code"
               className="input font-mono text-[13px] leading-relaxed min-h-[320px] resize-y"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               spellCheck={false}
             />
-            <button className="btn-primary" onClick={submit} disabled={busy === "review"}>
+            <button className="btn-primary" onClick={submit} disabled={!!busy}>
               {busy === "review" ? "Judging…" : "Submit solution"}
             </button>
 

@@ -112,8 +112,8 @@ export default function LoginPage() {
           {mode === "otp-send" && (
             <>
               <div>
-                <label className="label">Your email</label>
-                <input className="input" type="email" value={email} readOnly />
+                <label className="label" htmlFor="login-your-email">Your email</label>
+                <input id="login-your-email" className="input" type="email" value={email} readOnly />
               </div>
               <button className="btn-primary w-full" onClick={sendCode} disabled={loading}>
                 {loading ? "Sending…" : "✉ Email me a login code"}
@@ -128,8 +128,8 @@ export default function LoginPage() {
           {mode === "otp-verify" && (
             <form onSubmit={verifyCode} className="space-y-4">
               <div>
-                <label className="label">Enter the 6-digit code sent to {sentTo}</label>
-                <input
+                <label className="label" htmlFor="login-enter-the-6-digit-code-sent-to">Enter the 6-digit code sent to {sentTo}</label>
+                <input id="login-enter-the-6-digit-code-sent-to"
                   className="input text-center text-2xl tracking-[0.5em] font-mono"
                   inputMode="numeric"
                   pattern="[0-9]{6}"
@@ -157,8 +157,8 @@ export default function LoginPage() {
           {mode === "password" && (
             <form onSubmit={passwordLogin} className="space-y-4">
               <div>
-                <label className="label">Email</label>
-                <input
+                <label className="label" htmlFor="login-email">Email</label>
+                <input id="login-email"
                   className="input"
                   type="email"
                   value={email}
@@ -168,8 +168,8 @@ export default function LoginPage() {
                 />
               </div>
               <div>
-                <label className="label">Password</label>
-                <input
+                <label className="label" htmlFor="login-password">Password</label>
+                <input id="login-password"
                   className="input"
                   type="password"
                   value={password}

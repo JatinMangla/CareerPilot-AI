@@ -12,6 +12,8 @@ import { isBlockedListing } from "@/lib/jobFilters";
 import { Pager, usePaged } from "@/components/Pager";
 import { OUTCOME_STAGES, type AutoTailorPlan, type Job, type OutcomeStage, type QueuedApplication } from "@/lib/types";
 import { applicationStamp } from "@/lib/outcomes";
+import { useCancellable } from "@/lib/useCancellable";
+import RunProgress from "@/components/RunProgress";
 
 const PAGE_SIZE = 15;
 
@@ -20,6 +22,7 @@ export default function AutoPilotPage() {
   const [queue, setQueue] = useState<QueuedApplication[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
+  const run = useCancellable();
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -88,19 +91,32 @@ export default function AutoPilotPage() {
       // the sum of all ten. Overlap them; the per-job failure handling below is
       // unchanged, since mapPool reports errors per item instead of throwing.
       const profile = store.getProfile();
+      const signal = run.start();
       const outcomes = await mapPool(
         targets,
         AI_CONCURRENCY,
-        (job) =>
-          jsonTask<AutoTailorPlan>("auto_tailor", { resume: resume.text, job, profile }),
-        (done, total) => setProgress(`Tailoring… ${done}/${total} done`)
+        (job, _i, sig) =>
+          jsonTask<AutoTailorPlan>(
+            "auto_tailor",
+            { resume: resume.text, job, profile },
+            { signal: sig }
+          ),
+        (done, total) => setProgress(`Tailoring… ${done}/${total} done`),
+        signal
       );
 
       let quotaError = "";
-      for (const { item: job, value: plan, error } of outcomes) {
-        // Out of free quota is not this job's fault: leave it selectable for the
-        // next run instead of parking it behind a dead "failed" card.
-        if (!plan && /^Free limit reached/.test(error?.message || "")) {
+      let stopped = 0;
+      for (const { item: job, value: plan, error, skipped } of outcomes) {
+        // Cancelled before it ran: it stays selectable rather than becoming a
+        // "failed" card.
+        if (skipped) {
+          stopped++;
+          continue;
+        }
+        // Out of free quota is not this job's fault either: leave it selectable
+        // for the next run instead of parking it behind a dead card.
+        if (!plan && /rate-limited|quota/i.test(error?.message || "")) {
           quotaError = error!.message;
           continue;
         }
@@ -137,6 +153,7 @@ export default function AutoPilotPage() {
       }
       updateQueue((q) => [...q, ...added]);
       if (quotaError) setError(quotaError);
+      else if (stopped) setError(`Stopped — ${stopped} job${stopped === 1 ? "" : "s"} not tailored; they are still selectable.`);
     } finally {
       setBusy(false);
       setProgress("");
@@ -252,11 +269,13 @@ export default function AutoPilotPage() {
     }
     if (!hint) {
       const left = ready.length - batch.length;
-      setProgress(
+      const msg =
         `Opened ${result.opened} application${result.opened === 1 ? "" : "s"} in new tabs — ` +
-          `your kit for each is below. ${left > 0 ? `${left} still queued: click again for the next batch.` : ""}`
-      );
-      setTimeout(() => setProgress(""), 8000);
+        `your kit for each is below. ${left > 0 ? `${left} still queued: click again for the next batch.` : ""}`;
+      setProgress(msg);
+      // Clears only its own message — a run started within the 8s kept losing
+      // its progress line to this timer.
+      setTimeout(() => setProgress((p) => (p === msg ? "" : p)), 8000);
     }
   }
 
@@ -414,11 +433,7 @@ export default function AutoPilotPage() {
           {error}
         </div>
       )}
-      {progress && (
-        <div className="text-sm text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3 animate-pulse">
-          {progress}
-        </div>
-      )}
+      <RunProgress text={progress} onStop={busy ? run.cancel : undefined} />
 
       {/* Queue jobs */}
       <div className="card-pad space-y-3">
@@ -499,6 +514,7 @@ export default function AutoPilotPage() {
                   <button
                     className="text-[11px] text-coral-400 hover:underline"
                     title="Hide this job for good"
+                    aria-label={`Hide ${job.title} at ${job.company} for good`}
                     onClick={(e) => {
                       e.preventDefault();
                       setJobs(store.dismissJob(job));
@@ -684,7 +700,7 @@ function QueueCard({
         {item.status === "submitted" && (
           <label className="text-xs text-ink-400 flex items-center gap-1.5">
             What happened:
-            <select
+            <select aria-label="Outcome of this application"
               className="bg-ink-850 border border-ink-700 rounded-md px-1.5 py-0.5 text-ink-200"
               value={item.outcome || "applied"}
               onChange={(e) => onOutcome(e.target.value as OutcomeStage)}

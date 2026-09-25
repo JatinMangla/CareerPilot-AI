@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { store, defaultStats, defaultStrategy } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
+import CopyButton from "@/components/CopyButton";
 import { buildClaudeStrategyPrompt } from "@/lib/claudePrompt";
 import { outcomeSnapshot } from "@/lib/outcomes";
 import type { Strategy, Profile, UsageStats } from "@/lib/types";
@@ -17,7 +18,6 @@ export default function EvolvePage() {
   const [justEvolved, setJustEvolved] = useState(false);
   const [claudePrompt, setClaudePrompt] = useState("");
   const [claudeReply, setClaudeReply] = useState("");
-  const [copied, setCopied] = useState(false);
   const [merging, setMerging] = useState(false);
   const [skillsText, setSkillsText] = useState("");
   const [profileSaved, setProfileSaved] = useState(false);
@@ -120,7 +120,6 @@ export default function EvolvePage() {
         github: buildGithubSnapshot(),
       })
     );
-    setCopied(false);
   }
 
   /**
@@ -219,8 +218,8 @@ export default function EvolvePage() {
         </div>
 
         <div>
-          <label className="label">Optional: tell it what to get better at</label>
-          <input
+          <label className="label" htmlFor="evolve-optional-tell-it-what-to-get-bet">Optional: tell it what to get better at</label>
+          <input id="evolve-optional-tell-it-what-to-get-bet"
             className="input"
             placeholder='e.g. "cover letters feel generic", "focus on remote US jobs"'
             value={feedback}
@@ -255,16 +254,12 @@ export default function EvolvePage() {
         {claudePrompt && (
           <div className="space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
-              <button
+              <CopyButton
+                text={claudePrompt}
                 className="btn-primary text-xs"
-                onClick={() => {
-                  navigator.clipboard.writeText(claudePrompt);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-              >
-                {copied ? "✓ Copied" : "② Copy prompt"}
-              </button>
+                label="② Copy prompt"
+                doneLabel="✓ Copied"
+              />
               <a
                 href="https://claude.ai/new"
                 target="_blank"
@@ -289,8 +284,8 @@ export default function EvolvePage() {
         )}
 
         <div>
-          <label className="label">④ Paste Claude&apos;s answer here</label>
-          <textarea
+          <label className="label" htmlFor="evolve-paste-claude-s-answer-here">④ Paste Claude&apos;s answer here</label>
+          <textarea id="evolve-paste-claude-s-answer-here"
             className="input min-h-[160px] resize-y text-[13px]"
             placeholder="Paste everything Claude replied — the ===STRATEGY=== and ===NOTES=== blocks. Extra commentary is fine, it gets filtered out."
             value={claudeReply}
@@ -336,32 +331,32 @@ export default function EvolvePage() {
           <h2 className="h2">My profile (used in every AI task)</h2>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label className="label">Name</label>
-              <input
+              <label className="label" htmlFor="evolve-name">Name</label>
+              <input id="evolve-name"
                 className="input"
                 value={profile.name}
                 onChange={(e) => setProfile({ ...profile, name: e.target.value })}
               />
             </div>
             <div>
-              <label className="label">Current role</label>
-              <input
+              <label className="label" htmlFor="evolve-current-role">Current role</label>
+              <input id="evolve-current-role"
                 className="input"
                 value={profile.role}
                 onChange={(e) => setProfile({ ...profile, role: e.target.value })}
               />
             </div>
             <div>
-              <label className="label">Desired roles</label>
-              <input
+              <label className="label" htmlFor="evolve-desired-roles">Desired roles</label>
+              <input id="evolve-desired-roles"
                 className="input"
                 value={profile.desiredRoles}
                 onChange={(e) => setProfile({ ...profile, desiredRoles: e.target.value })}
               />
             </div>
             <div>
-              <label className="label">Locations</label>
-              <input
+              <label className="label" htmlFor="evolve-locations">Locations</label>
+              <input id="evolve-locations"
                 className="input"
                 value={profile.locations}
                 onChange={(e) => setProfile({ ...profile, locations: e.target.value })}
@@ -422,8 +417,8 @@ export default function EvolvePage() {
             </p>
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="label">Phone</label>
-                <input
+                <label className="label" htmlFor="evolve-phone">Phone</label>
+                <input id="evolve-phone"
                   className="input"
                   placeholder="+91 98765 43210"
                   value={profile.phone || ""}
@@ -431,8 +426,8 @@ export default function EvolvePage() {
                 />
               </div>
               <div>
-                <label className="label">LinkedIn URL</label>
-                <input
+                <label className="label" htmlFor="evolve-linkedin-url">LinkedIn URL</label>
+                <input id="evolve-linkedin-url"
                   className="input"
                   placeholder="https://linkedin.com/in/…"
                   value={profile.linkedin || ""}
@@ -440,8 +435,8 @@ export default function EvolvePage() {
                 />
               </div>
               <div>
-                <label className="label">GitHub URL</label>
-                <input
+                <label className="label" htmlFor="evolve-github-url">GitHub URL</label>
+                <input id="evolve-github-url"
                   className="input"
                   placeholder="https://github.com/JatinMangla"
                   value={profile.github || ""}
@@ -449,8 +444,8 @@ export default function EvolvePage() {
                 />
               </div>
               <div>
-                <label className="label">Portfolio / website</label>
-                <input
+                <label className="label" htmlFor="evolve-portfolio-website">Portfolio / website</label>
+                <input id="evolve-portfolio-website"
                   className="input"
                   placeholder="https://…"
                   value={profile.portfolio || ""}
@@ -458,8 +453,8 @@ export default function EvolvePage() {
                 />
               </div>
               <div>
-                <label className="label">Notice period</label>
-                <input
+                <label className="label" htmlFor="evolve-notice-period">Notice period</label>
+                <input id="evolve-notice-period"
                   className="input"
                   placeholder="e.g. 30 days / Immediate"
                   value={profile.noticePeriod || ""}
@@ -467,8 +462,8 @@ export default function EvolvePage() {
                 />
               </div>
               <div>
-                <label className="label">Expected CTC</label>
-                <input
+                <label className="label" htmlFor="evolve-expected-ctc">Expected CTC</label>
+                <input id="evolve-expected-ctc"
                   className="input"
                   placeholder="e.g. ₹12 LPA"
                   value={profile.expectedCtc || ""}

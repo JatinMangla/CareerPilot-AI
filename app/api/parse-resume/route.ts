@@ -18,10 +18,13 @@ export async function POST(req: Request) {
   try {
     let text = "";
     if (name.endsWith(".pdf")) {
-      // import the inner module to avoid pdf-parse's debug-mode side effect
-      const pdfParse = (await import("pdf-parse/lib/pdf-parse.js" as any)).default;
-      const result = await pdfParse(buf);
-      text = result.text;
+      // unpdf wraps a current, serverless build of Mozilla's pdf.js. It replaced
+      // pdf-parse, which was unmaintained since 2018 and bundled pdf.js 1.10 to
+      // parse files uploaded from anywhere.
+      const { extractText, getDocumentProxy } = await import("unpdf");
+      const pdf = await getDocumentProxy(new Uint8Array(buf));
+      const result = await extractText(pdf, { mergePages: true });
+      text = Array.isArray(result.text) ? result.text.join("\n") : result.text;
     } else if (name.endsWith(".docx")) {
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ buffer: buf });

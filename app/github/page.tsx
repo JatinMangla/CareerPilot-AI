@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
+import CopyButton from "@/components/CopyButton";
 
 interface Review {
   verdict: string;
@@ -19,7 +20,6 @@ export default function GithubPage() {
   const [review, setReview] = useState<Review | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const p = store.getProfile();
@@ -37,6 +37,9 @@ export default function GithubPage() {
   }, []);
 
   async function run() {
+    // Enter in the username box bypassed the button's disabled state, firing
+    // overlapping audits (and one with an empty username).
+    if (busy || !username.trim()) return;
     const resume = store.getResume();
     if (!resume?.text) return setError("Add your resume first — the audit compares against it.");
     setError("");
@@ -95,8 +98,8 @@ export default function GithubPage() {
 
       <div className="card-pad flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[240px]">
-          <label className="label">GitHub username or profile URL</label>
-          <input
+          <label className="label" htmlFor="github-github-username-or-profile-url">GitHub username or profile URL</label>
+          <input id="github-github-username-or-profile-url"
             className="input"
             placeholder="JatinMangla"
             value={username}
@@ -174,16 +177,11 @@ export default function GithubPage() {
           <div className="card-pad">
             <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
               <h2 className="h2">Profile README</h2>
-              <button
+              <CopyButton
+                text={review.profileReadme}
                 className="btn-secondary text-xs"
-                onClick={() => {
-                  navigator.clipboard.writeText(review.profileReadme);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                }}
-              >
-                {copied ? "Copied ✓" : "Copy markdown"}
-              </button>
+                label="Copy markdown"
+              />
             </div>
             <p className="text-xs text-ink-400 mb-2">
               Create a repo named exactly <code className="text-neon-400">{data?.profile?.login}</code>{" "}

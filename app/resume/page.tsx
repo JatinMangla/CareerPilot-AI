@@ -249,7 +249,7 @@ export default function ResumePage() {
               />
             </div>
           </div>
-          <textarea
+          <textarea aria-label="Resume text"
             className="input font-mono text-[13px] leading-relaxed min-h-[420px] resize-y"
             placeholder={"Paste your resume text here, or upload a file above…"}
             value={text}
@@ -263,7 +263,7 @@ export default function ResumePage() {
             >
               Save resume
             </button>
-            <select
+            <select aria-label="PDF template"
               className="input w-auto py-2 text-xs"
               value={tpl}
               onChange={(e) => pickTemplate(e.target.value as "classic" | "modern")}
@@ -363,6 +363,7 @@ export default function ResumePage() {
                         key={k}
                         onClick={() => dropKeyword(k)}
                         title="Remove"
+                        aria-label={`Remove keyword ${k}`}
                         className="text-[11px] rounded-full px-2.5 py-1 bg-ink-850 hover:bg-coral-500/15 text-ink-300 hover:text-coral-400"
                       >
                         {k} <span className="opacity-60">×</span>
@@ -396,7 +397,7 @@ export default function ResumePage() {
             <label className="label">
               {fixes > 0 ? "Anything else to add" : "Optional instructions"}
             </label>
-            <textarea
+            <textarea aria-label="Instructions for the AI"
               className="input min-h-[70px] resize-y text-sm"
               placeholder='e.g. "make it one page", "emphasize React performance work"'
               value={instructions}

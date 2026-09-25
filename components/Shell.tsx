@@ -56,13 +56,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             key={item.href}
             href={item.href}
             onClick={() => setOpen(false)}
+            aria-current={active ? "page" : undefined}
             className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition ${
               active
                 ? "bg-neon-500/12 text-neon-400 border border-neon-500/25"
                 : "text-ink-300 hover:text-ink-100 hover:bg-ink-800 border border-transparent"
             }`}
           >
-            <span className="w-5 text-center text-base leading-none">{item.icon}</span>
+            <span className="w-5 text-center text-base leading-none" aria-hidden="true">{item.icon}</span>
             {item.label}
           </Link>
         );
@@ -113,12 +114,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <button
           onClick={() => setOpen(!open)}
           className="btn-secondary px-3 py-1.5 text-xs"
+          aria-expanded={open}
+          aria-controls="mobile-nav"
         >
           {open ? "Close" : "Menu"}
         </button>
       </div>
       {open && (
-        <div className="md:hidden fixed inset-x-0 top-[53px] bottom-0 z-40 flex flex-col bg-ink-900/95 backdrop-blur border-b border-ink-800">
+        <div
+          id="mobile-nav"
+          className="md:hidden fixed inset-x-0 top-[53px] bottom-0 z-40 flex flex-col bg-ink-900/95 backdrop-blur border-b border-ink-800"
+        >
           <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-4">{nav}</div>
           <div className="shrink-0 p-4 pt-3 border-t border-ink-800">
             <button onClick={() => logout()} className="btn-secondary w-full text-xs">

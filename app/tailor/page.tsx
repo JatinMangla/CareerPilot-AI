@@ -6,8 +6,12 @@ import { store } from "@/lib/store";
 import { jsonTask, streamTask } from "@/lib/aiClient";
 import { describeClaims, newClaims } from "@/lib/claimCheck";
 import type { TailorPlan, ResumeData } from "@/lib/types";
+import CopyButton from "@/components/CopyButton";
 
 type Stage = "input" | "review" | "result";
+
+/** This device's in-progress plan, so leaving the page doesn't lose it. */
+const DRAFT_KEY = "cp_tailor_draft";
 
 export default function TailorPage() {
   const [jd, setJd] = useState("");
@@ -30,7 +34,32 @@ export default function TailorPage() {
 
   useEffect(() => {
     setHasResume(!!store.getResume()?.text);
+    // Pick up a plan in progress. It used to live only in React state, so
+    // leaving the page threw away an AI plan and every answer typed into it.
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(DRAFT_KEY) || "null");
+      if (saved?.plan) {
+        setJd(saved.jd || "");
+        setPlan(saved.plan);
+        setAccepted(saved.accepted || {});
+        setAnswers(saved.answers || {});
+        setStage("review");
+      } else if (saved?.jd) {
+        setJd(saved.jd);
+      }
+    } catch {
+      /* nothing to restore */
+    }
   }, []);
+
+  useEffect(() => {
+    try {
+      if (!jd && !plan) window.localStorage.removeItem(DRAFT_KEY);
+      else window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ jd, plan, accepted, answers }));
+    } catch {
+      /* storage full — the page still works, it just won't resume */
+    }
+  }, [jd, plan, accepted, answers]);
 
   async function makePlan() {
     const resume = store.getResume();
@@ -149,8 +178,8 @@ export default function TailorPage() {
 
       {stage === "input" && (
         <div className="card-pad space-y-4">
-          <label className="label">Job description</label>
-          <textarea
+          <label className="label" htmlFor="tailor-job-description">Job description</label>
+          <textarea id="tailor-job-description"
             className="input min-h-[280px] resize-y"
             placeholder="Paste the full job description here…"
             value={jd}
@@ -174,8 +203,8 @@ export default function TailorPage() {
               <h2 className="h2">The AI needs to ask you first</h2>
               {plan.questions.map((q, i) => (
                 <div key={i}>
-                  <label className="label">{q}</label>
-                  <input
+                  <label className="label" htmlFor="tailor-field">{q}</label>
+                  <input id="tailor-field"
                     className="input"
                     placeholder="Your answer (leave empty to skip)"
                     value={answers[i] || ""}
@@ -247,11 +276,14 @@ export default function TailorPage() {
               <button
                 className="btn-secondary"
                 onClick={() => {
+                  // "Back" to edit the job description; the paid-for plan is only
+                  // discarded when you make a new one or ask for it here.
+                  if (!window.confirm("Discard this plan and start over?")) return;
                   setStage("input");
                   setPlan(null);
                 }}
               >
-                Back
+                Start over
               </button>
             </div>
           </div>
@@ -300,12 +332,7 @@ export default function TailorPage() {
               >
                 ⬇ Download PDF
               </button>
-              <button
-                className="btn-secondary"
-                onClick={() => navigator.clipboard.writeText(output)}
-              >
-                Copy
-              </button>
+              <CopyButton text={output} />
               <button className="btn-secondary" onClick={() => setStage("review")}>
                 Back to plan
               </button>
