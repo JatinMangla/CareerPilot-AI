@@ -147,9 +147,9 @@ cross-device sync.
 |   |   `-- scan.mjs  (318)
 |   |-- ai-cost.mjs  (334)
 |   |-- check.mjs  (82)
-|   |-- dep-graph.mjs  (164)
+|   |-- dep-graph.mjs  (165)
 |   |-- doctor.mjs  (175)
-|   |-- repo-map.mjs  (229)
+|   |-- repo-map.mjs  (231)
 |   |-- test.mjs  (92)
 |   |-- token-budget.json
 |   `-- tree.mjs  (97)
@@ -163,10 +163,10 @@ cross-device sync.
 |-- .nvmrc
 |-- CLAUDE.md
 |-- README.md
-|-- middleware.ts  (36)
-|-- next.config.mjs  (67)
+|-- next.config.mjs  (59)
 |-- package.json
 |-- postcss.config.mjs  (10)
+|-- proxy.ts  (41)
 |-- tailwind.config.ts  (55)
 `-- tsconfig.json
 ```
@@ -286,9 +286,9 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | [lib/syncMerge.ts](../lib/syncMerge.ts) | 211 | COLLECTION_ID, Envelope, IncomingEntry, ListPatch, MAX_CLOCK_SKEW_MS, Resolution, TOMBSTONE_TTL_MS, Tombstones, +7 | 2 |
 | [lib/types.ts](../lib/types.ts) | 351 | AutoTailorPlan, DismissedJob, ImprovementBrief, InboxCursor, InboxMessage, Job, MailCategory, OUTCOME_STAGES, +21 | 19 |
 | [lib/useCancellable.ts](../lib/useCancellable.ts) | 26 | useCancellable | 4 |
-| [middleware.ts](../middleware.ts) | 36 | config, middleware | 0 |
-| [next.config.mjs](../next.config.mjs) | 67 | — | 0 |
+| [next.config.mjs](../next.config.mjs) | 59 | — | 0 |
 | [postcss.config.mjs](../postcss.config.mjs) | 10 | — | 0 |
+| [proxy.ts](../proxy.ts) | 41 | config, proxy | 0 |
 | [tailwind.config.ts](../tailwind.config.ts) | 55 | — | 0 |
 | [tests/agentFields.test.mjs](../tests/agentFields.test.mjs) | 35 | — | 0 |
 | [tests/helpers.mjs](../tests/helpers.mjs) | 10 | lib | 3 |

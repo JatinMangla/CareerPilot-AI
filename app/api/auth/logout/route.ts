@@ -11,7 +11,7 @@ export const runtime = "nodejs";
  */
 export async function POST(req: Request) {
   const { everywhere } = await req.json().catch(() => ({}));
-  const jar = cookies();
+  const jar = await cookies();
   const session = await readSession(jar.get(SESSION_COOKIE)?.value);
 
   try {

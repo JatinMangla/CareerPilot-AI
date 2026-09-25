@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth";
 
-export async function middleware(req: NextRequest) {
+/**
+ * Route gate (Next 16 renamed middleware to proxy; it now runs on Node.js).
+ * Signature, age and owner only — revocation is checked by requireSession() in
+ * the data routes, where a Redis round trip is worth paying.
+ */
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // public paths

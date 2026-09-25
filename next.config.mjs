@@ -52,15 +52,7 @@ const nextConfig = {
       { source: "/auto-apply", destination: "/apply?tab=kits", permanent: false },
     ];
   },
-  experimental: {
-    serverComponentsExternalPackages: [
-      "unpdf",
-      "mammoth",
-      "imapflow",
-      "mailparser",
-      "nodemailer",
-    ],
-  },
+  serverExternalPackages: ["unpdf", "mammoth", "imapflow", "mailparser", "nodemailer"],
 };
 
 export default nextConfig;

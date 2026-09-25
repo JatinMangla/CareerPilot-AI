@@ -80,9 +80,9 @@ graph LR
     lib_useCancellable_ts["lib/useCancellable.ts"]
   end
   subgraph "Root"
-    middleware_ts["middleware.ts"]
     next_config_mjs["next.config.mjs"]
     postcss_config_mjs["postcss.config.mjs"]
+    proxy_ts["proxy.ts"]
     tailwind_config_ts["tailwind.config.ts"]
     tests_agentFields_test_mjs["tests/agentFields.test.mjs"]
     tests_helpers_mjs["tests/helpers.mjs"]
@@ -245,7 +245,7 @@ graph LR
   lib_store_ts --> lib_syncMerge_ts
   lib_store_ts --> lib_types_ts
   lib_syncMerge_ts --> lib_stableJson_ts
-  middleware_ts --> lib_auth_ts
+  proxy_ts --> lib_auth_ts
   tests_jobFilters_test_mjs --> tests_helpers_mjs
   tests_scoring_test_mjs --> tests_helpers_mjs
   tests_syncMerge_test_mjs --> tests_helpers_mjs
@@ -261,7 +261,7 @@ Change one of these and every file listed has to keep working.
 | `lib/store.ts` | 17 | `app/evolve/page.tsx`, `app/github/page.tsx`, `app/inbox/page.tsx`, `app/interview/page.tsx`, `app/jobs/page.tsx`, `app/outreach/page.tsx`, `app/page.tsx`, `app/practice/page.tsx`, `app/referrals/page.tsx`, `app/resume/page.tsx`, `app/tailor/page.tsx`, `app/validate/page.tsx`, `components/SyncProvider.tsx`, `components/apply/ApplyKits.tsx`, `components/apply/AutoPilot.tsx`, `lib/aiClient.ts`, `lib/outcomes.ts` |
 | `lib/aiClient.ts` | 13 | `app/evolve/page.tsx`, `app/github/page.tsx`, `app/inbox/page.tsx`, `app/interview/page.tsx`, `app/jobs/page.tsx`, `app/outreach/page.tsx`, `app/practice/page.tsx`, `app/referrals/page.tsx`, `app/resume/page.tsx`, `app/tailor/page.tsx`, `app/validate/page.tsx`, `components/apply/ApplyKits.tsx`, `components/apply/AutoPilot.tsx` |
 | `lib/session.ts` | 10 | `app/api/ai/route.ts`, `app/api/auth/login/route.ts`, `app/api/auth/logout/route.ts`, `app/api/auth/verify/route.ts`, `app/api/email/send/route.ts`, `app/api/github/route.ts`, `app/api/inbox/sync/route.ts`, `app/api/jobs/route.ts`, `app/api/parse-resume/route.ts`, `app/api/state/route.ts` |
-| `lib/auth.ts` | 7 | `app/api/auth/forgot/route.ts`, `app/api/auth/login/route.ts`, `app/api/auth/logout/route.ts`, `app/api/auth/verify/route.ts`, `lib/otp.ts`, `lib/session.ts`, `middleware.ts` |
+| `lib/auth.ts` | 7 | `app/api/auth/forgot/route.ts`, `app/api/auth/login/route.ts`, `app/api/auth/logout/route.ts`, `app/api/auth/verify/route.ts`, `lib/otp.ts`, `lib/session.ts`, `proxy.ts` |
 | `lib/jobFilters.ts` | 7 | `app/api/jobs/route.ts`, `app/jobs/page.tsx`, `components/apply/ApplyKits.tsx`, `components/apply/AutoPilot.tsx`, `lib/companyBoards.ts`, `lib/outcomes.ts`, `lib/store.ts` |
 | `lib/kv.ts` | 7 | `app/api/auth/forgot/route.ts`, `app/api/state/route.ts`, `lib/aiCache.ts`, `lib/gemini.ts`, `lib/otp.ts`, `lib/rateLimit.ts`, `lib/session.ts` |
 | `components/Pager.tsx` | 6 | `app/inbox/page.tsx`, `app/jobs/page.tsx`, `app/outreach/page.tsx`, `app/referrals/page.tsx`, `components/apply/ApplyKits.tsx`, `components/apply/AutoPilot.tsx` |
@@ -285,7 +285,7 @@ Change one of these and every file listed has to keep working.
 - `lib/store.ts` ← `app/evolve/page.tsx`, `app/github/page.tsx`, `app/inbox/page.tsx`, `app/interview/page.tsx`, `app/jobs/page.tsx`, `app/outreach/page.tsx`, `app/page.tsx`, `app/practice/page.tsx`, `app/referrals/page.tsx`, `app/resume/page.tsx`, `app/tailor/page.tsx`, `app/validate/page.tsx`, `components/SyncProvider.tsx`, `components/apply/ApplyKits.tsx`, `components/apply/AutoPilot.tsx`, `lib/aiClient.ts`, `lib/outcomes.ts`
 - `lib/aiClient.ts` ← `app/evolve/page.tsx`, `app/github/page.tsx`, `app/inbox/page.tsx`, `app/interview/page.tsx`, `app/jobs/page.tsx`, `app/outreach/page.tsx`, `app/practice/page.tsx`, `app/referrals/page.tsx`, `app/resume/page.tsx`, `app/tailor/page.tsx`, `app/validate/page.tsx`, `components/apply/ApplyKits.tsx`, `components/apply/AutoPilot.tsx`
 - `lib/session.ts` ← `app/api/ai/route.ts`, `app/api/auth/login/route.ts`, `app/api/auth/logout/route.ts`, `app/api/auth/verify/route.ts`, `app/api/email/send/route.ts`, `app/api/github/route.ts`, `app/api/inbox/sync/route.ts`, `app/api/jobs/route.ts`, `app/api/parse-resume/route.ts`, `app/api/state/route.ts`
-- `lib/auth.ts` ← `app/api/auth/forgot/route.ts`, `app/api/auth/login/route.ts`, `app/api/auth/logout/route.ts`, `app/api/auth/verify/route.ts`, `lib/otp.ts`, `lib/session.ts`, `middleware.ts`
+- `lib/auth.ts` ← `app/api/auth/forgot/route.ts`, `app/api/auth/login/route.ts`, `app/api/auth/logout/route.ts`, `app/api/auth/verify/route.ts`, `lib/otp.ts`, `lib/session.ts`, `proxy.ts`
 - `lib/jobFilters.ts` ← `app/api/jobs/route.ts`, `app/jobs/page.tsx`, `components/apply/ApplyKits.tsx`, `components/apply/AutoPilot.tsx`, `lib/companyBoards.ts`, `lib/outcomes.ts`, `lib/store.ts`
 - `lib/kv.ts` ← `app/api/auth/forgot/route.ts`, `app/api/state/route.ts`, `lib/aiCache.ts`, `lib/gemini.ts`, `lib/otp.ts`, `lib/rateLimit.ts`, `lib/session.ts`
 - `components/Pager.tsx` ← `app/inbox/page.tsx`, `app/jobs/page.tsx`, `app/outreach/page.tsx`, `app/referrals/page.tsx`, `components/apply/ApplyKits.tsx`, `components/apply/AutoPilot.tsx`

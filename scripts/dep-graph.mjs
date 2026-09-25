@@ -79,6 +79,7 @@ function report() {
     /^app\/.*(page|route|layout|error)\.tsx?$/.test(f) ||
     /^[^/]+\.config\.(mjs|js|ts)$/.test(f) ||
     f === "middleware.ts" ||
+    f === "proxy.ts" ||
     f.startsWith("scripts/") ||
     f.startsWith("agent/") ||
     f.endsWith(".d.ts");

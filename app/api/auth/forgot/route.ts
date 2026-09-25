@@ -51,7 +51,7 @@ export async function POST(req: Request) {
   }
 
   // Short client-side cooldown purely for UX (stops double-clicks).
-  if (cookies().get("cp_otp_cooldown")) {
+  if ((await cookies()).get("cp_otp_cooldown")) {
     return Response.json(
       { error: "A code was just sent — check your inbox (and spam). You can request another in a minute." },
       { status: 429 }
@@ -85,7 +85,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const jar = cookies();
+  const jar = await cookies();
   const secure = process.env.NODE_ENV === "production";
   jar.set(OTP_COOKIE, nonce, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: OTP_TTL_SEC });
   jar.set("cp_otp_cooldown", "1", { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: 60 });

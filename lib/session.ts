@@ -33,7 +33,7 @@ export async function currentEpoch(): Promise<number> {
 /** Returns a 401 response to send back, or null when the session is good. */
 export async function requireSession(): Promise<Response | null> {
   const denied = () => Response.json({ error: "Not authenticated" }, { status: 401 });
-  const session = await readSession(cookies().get(SESSION_COOKIE)?.value);
+  const session = await readSession((await cookies()).get(SESSION_COOKIE)?.value);
   if (!session) return denied();
   if (!kvConfigured()) return null;
 

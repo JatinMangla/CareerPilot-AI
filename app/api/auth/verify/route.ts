@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   }
 
   const { code } = await req.json().catch(() => ({}));
-  const jar = cookies();
+  const jar = await cookies();
 
   let result;
   try {

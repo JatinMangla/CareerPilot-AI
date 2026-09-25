@@ -15,7 +15,9 @@ tokens and saves far more than that in grepping. If it looks out of date, run
 
 ## Stack
 
-Next.js 14 (App Router) · TypeScript · Tailwind 3 · deployed on Vercel.
+Next.js 16 (App Router, Turbopack) · React 19 · TypeScript · Tailwind 3 · deployed on Vercel.
+The route gate is `proxy.ts` (Next 16's name for middleware, running on Node.js).
+`cookies()` is async: always `await cookies()`.
 API routes under `app/api/` are the entire backend — there is no separate server.
 Google Gemini free tier is the **sole** AI provider.
 State lives in browser localStorage, mirrored to Upstash Redis for cross-device sync.

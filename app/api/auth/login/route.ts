@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   }
 
   const token = await createSessionToken(allowedEmail, await currentEpoch());
-  cookies().set(SESSION_COOKIE, token, {
+  (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

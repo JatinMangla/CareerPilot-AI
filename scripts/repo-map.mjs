@@ -37,15 +37,17 @@ function serviceOf(file, imports) {
 }
 
 /**
- * Paths middleware.ts lets through unauthenticated.
+ * Paths the route gate lets through unauthenticated. Next 16 renamed
+ * middleware.ts to proxy.ts; either is read.
  *
  * Read from the actual predicates — `pathname.startsWith("/x")` and
  * `pathname === "/x"` — rather than from every quoted string in the file, which
  * would also pick up import specifiers and the matcher regex.
  */
 function publicRoutes() {
-  if (!existsSync(join(ROOT, "middleware.ts"))) return null;
-  const src = read("middleware.ts");
+  const gate = ["proxy.ts", "middleware.ts"].find((f) => existsSync(join(ROOT, f)));
+  if (!gate) return null;
+  const src = read(gate);
 
   /*
    * Only the allow-list ABOVE the session check counts. Below it there is a

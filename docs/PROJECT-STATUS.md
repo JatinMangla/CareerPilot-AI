@@ -36,7 +36,7 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
   - Never go back to keeping the counter in a cookie. The attacker holds that cookie and can
     replay it to reset the count.
   - Without Redis, the code route answers 503 and password login still works.
-- **Sessions:** the token is signed and carries `email:issuedAt:epoch`, and middleware checks
+- **Sessions:** the token is signed and carries `email:issuedAt:epoch`, and the route gate (`proxy.ts`) checks
   signature, age (30 days) and owner, statelessly.
   - Every data route also calls `requireSession()`. That checks two things in Redis:
     `cp:session:revoked:<sig>`, which "Sign out" sets for one session, and
@@ -186,26 +186,10 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
 
 ## Open items (highest value first)
 
-Both remaining items need an action only the owner can take. The Claude Code auto-mode
-safety check blocks Claude from doing them, even with the owner's verbal approval.
+The remaining item needs an action only the owner can take. The Claude Code auto-mode safety
+check blocks Claude from writing production secrets, even with the owner's verbal approval.
 
-1. **Next.js 14 → 16.** `npm audit` reports one critical advisory (Next itself) and one high
-   (postcss), and only a major upgrade fixes them.
-   - **Why it's still open:** on 2026-09-25 the auto-mode check blocked
-     `npm install next@16 react@19` twice ("Production Deploy"), including after the owner said
-     "do all things". It needs either the owner running the install, or a Bash permission rule.
-   - **Start by installing** (from PowerShell, in the repo):
-     `npm install next@16.3.6 react@^19 react-dom@^19` and
-     `npm install -D @types/react@^19 @types/react-dom@^19`.
-   - **Then a Claude session does:**
-     - Change every `cookies()` to `await cookies()`: the auth routes and `lib/session.ts`.
-     - Move `experimental.serverComponentsExternalPackages` → top-level `serverExternalPackages`.
-     - Optionally rename `middleware.ts` → `proxy.ts`.
-     - Rebuild via PowerShell.
-     - Re-run the browser smoke test described under Verification tooling.
-   - **Mitigation until then:** Vercel-hosted deployments are shielded from several of the
-     listed issues, and the app uses no rewrites or image remotePatterns.
-2. **Rotate `AUTH_PASSWORD` and the Resend key.** Both were exposed in earlier chats or notes.
+1. **Rotate `AUTH_PASSWORD` and the Resend key.** Both were exposed in earlier chats or notes.
    - **Password:** a new random password is already generated in
      `C:\Users\jmangla.AAPNAINFOTECH\careerpilot-new-password.txt`, in the home folder, which
      OneDrive does not sync.
@@ -218,13 +202,33 @@ safety check blocks Claude from doing them, even with the owner's verbal approva
      - Then store the password somewhere safe and delete the file.
    - **Resend:** create a new key in the Resend dashboard, then replace `RESEND_API_KEY` the same
      way.
-3. Security-headers CSP still allows `'unsafe-inline'` and `'unsafe-eval'`. `@react-pdf` needs
+2. Security-headers CSP still allows `'unsafe-inline'` and `'unsafe-eval'`. `@react-pdf` needs
    eval, and a nonce would force dynamic rendering. This is a deliberate trade-off.
    - On 2026-09-25 PDF export was verified working under this CSP in a real browser.
 
 ---
 
 ## Change log
+
+### 2026-09-25 (later): Next.js 16 and React 19
+
+- **Upgrade:** Next 14.2.35 → 16.3.6 and React 18 → 19.3. The owner ran the install; the code
+  changes were done here.
+  - `cookies()` is awaited everywhere: the auth routes and `lib/session.ts`.
+  - `middleware.ts` → `proxy.ts`, exporting `proxy`; it runs on Node.js.
+  - `experimental.serverComponentsExternalPackages` → `serverExternalPackages`.
+  - Next rewrote `tsconfig.json` with `jsx: react-jsx`; keep that.
+  - `scripts/repo-map.mjs` and `scripts/dep-graph.mjs` understand `proxy.ts`.
+- **Result:** `npm audit --omit=dev` now reports **0** vulnerabilities (it was 1 critical and
+  1 high).
+- **Verified on the Next 16 build:**
+  - security headers, 401s and the login redirect;
+  - password login, tamper rejection and logout;
+  - PDF upload;
+  - 16 of 16 fake-Redis end-to-end checks;
+  - a Playwright pass: all pages render, Apply tabs and redirects work, PDF export works
+    under the CSP, and the tailor draft persists;
+  - a live board search: 60 of 60 listings with descriptions, in 13.8s cold (it was 34s).
 
 ### 2026-09-25 (later): Apply page merge, live sync check
 
