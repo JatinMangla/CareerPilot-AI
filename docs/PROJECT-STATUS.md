@@ -5,7 +5,7 @@ standing rules; this file says **where the project is now, how the non-obvious s
 and what is still open**. Update the "Open items" and "Change log" sections whenever you finish
 a piece of work, so this stays true.
 
-_Last updated: 2026-09-25_
+_Last updated: 2026-09-26_
 
 ---
 
@@ -184,31 +184,37 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
 
 ---
 
-## Open items (highest value first)
+## Open items
 
-The remaining item needs an action only the owner can take. The Claude Code auto-mode safety
-check blocks Claude from writing production secrets, even with the owner's verbal approval.
+None as of 2026-09-26. Everything from the 2026-09-24 audit is done and deployed.
 
-1. **Rotate `AUTH_PASSWORD` and the Resend key.** Both were exposed in earlier chats or notes.
-   - **Password:** a new random password is already generated in
-     `C:\Users\jmangla.AAPNAINFOTECH\careerpilot-new-password.txt`, in the home folder, which
-     OneDrive does not sync.
-     - The auto-mode check blocked writing it to Vercel ("Secret-Store Writes").
-     - The owner runs, from the repo:
-       - `cmd /c "npx vercel env rm AUTH_PASSWORD production -y"`
-       - `cmd /c "npx vercel env add AUTH_PASSWORD production < C:\Users\jmangla.AAPNAINFOTECH\careerpilot-new-password.txt"`
-     - Then redeploy: push any commit, or run `npx vercel --prod`. Env changes apply only to new
-       deployments.
-     - Then store the password somewhere safe and delete the file.
-   - **Resend:** create a new key in the Resend dashboard, then replace `RESEND_API_KEY` the same
-     way.
-2. Security-headers CSP still allows `'unsafe-inline'` and `'unsafe-eval'`. `@react-pdf` needs
-   eval, and a nonce would force dynamic rendering. This is a deliberate trade-off.
-   - On 2026-09-25 PDF export was verified working under this CSP in a real browser.
+Standing notes for future work, not defects:
+
+- **CSP:** it still allows `'unsafe-inline'` and `'unsafe-eval'`. `@react-pdf` needs eval, and a
+  nonce would force every page to render dynamically. PDF export was verified working under this
+  CSP on Next 16. Revisit only if PDF generation moves to the server.
+- **Secret rotation:** when a secret needs replacing, the Claude Code auto-mode check blocks
+  Claude from writing to Vercel env ("Secret-Store Writes"). Claude generates the value into a
+  file in the owner's home folder (not the OneDrive-synced Desktop), and the owner runs these
+  from PowerShell:
+  - `cmd /c "npx vercel env rm NAME production -y"`
+  - `cmd /c "npx vercel env add NAME production < file"`
+  - `npx vercel --prod`
+- **Vercel CLI:** from PowerShell, `npx vercel …` sometimes dies with
+  `EPERM lstat 'C:\Users\Administrator'`. `node node_modules/vercel/dist/index.js …` always
+  works.
 
 ---
 
 ## Change log
+
+### 2026-09-26: secrets rotated
+
+- The owner replaced `AUTH_PASSWORD` with a generated 24-character password and created a new
+  Resend key, revoking the old one. Both were exposed in earlier chats.
+- Redeployed. Checked: Vercel shows both variables recently updated, the latest production
+  deploy is Ready, the live login page loads, and a wrong password gets 401.
+- The temporary password and key files were deleted from the owner's home folder.
 
 ### 2026-09-25 (later): Next.js 16 and React 19
 
