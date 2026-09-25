@@ -2,7 +2,7 @@
 
 <!-- GENERATED FILE. Do not edit by hand: node scripts/repo-map.mjs -->
 
-_81 source files · 15 pages · 11 API routes · 19 AI tasks · generated 2026-09-24_
+_85 source files · 15 pages · 11 API routes · 19 AI tasks · generated 2026-09-25_
 
 **Read this before exploring.** It is regenerated from the source, so it does not drift.
 For import relationships see [docs/dep-graph.md](../docs/dep-graph.md).
@@ -61,35 +61,35 @@ cross-device sync.
 |   |   |-- jobs/
 |   |   |   `-- route.ts  (282)
 |   |   |-- parse-resume/
-|   |   |   `-- route.ts  (53)
+|   |   |   `-- route.ts  (56)
 |   |   `-- state/
 |   |       `-- route.ts  (181)
 |   |-- auto-apply/
-|   |   `-- page.tsx  (595)
+|   |   `-- page.tsx  (605)
 |   |-- autopilot/
-|   |   `-- page.tsx  (848)
+|   |   `-- page.tsx  (864)
 |   |-- evolve/
-|   |   `-- page.tsx  (496)
+|   |   `-- page.tsx  (491)
 |   |-- github/
-|   |   `-- page.tsx  (243)
+|   |   `-- page.tsx  (241)
 |   |-- inbox/
-|   |   `-- page.tsx  (543)
+|   |   `-- page.tsx  (554)
 |   |-- interview/
-|   |   `-- page.tsx  (352)
+|   |   `-- page.tsx  (428)
 |   |-- jobs/
-|   |   `-- page.tsx  (748)
+|   |   `-- page.tsx  (757)
 |   |-- login/
 |   |   `-- page.tsx  (227)
 |   |-- outreach/
-|   |   `-- page.tsx  (431)
+|   |   `-- page.tsx  (427)
 |   |-- practice/
-|   |   `-- page.tsx  (257)
+|   |   `-- page.tsx  (269)
 |   |-- referrals/
-|   |   `-- page.tsx  (327)
+|   |   `-- page.tsx  (319)
 |   |-- resume/
-|   |   `-- page.tsx  (493)
+|   |   `-- page.tsx  (494)
 |   |-- tailor/
-|   |   `-- page.tsx  (324)
+|   |   `-- page.tsx  (351)
 |   |-- validate/
 |   |   `-- page.tsx  (307)
 |   |-- error.tsx  (45)
@@ -97,8 +97,10 @@ cross-device sync.
 |   |-- layout.tsx  (24)
 |   `-- page.tsx  (318)
 |-- components/   # shared client components
+|   |-- CopyButton.tsx  (42)
 |   |-- Pager.tsx  (123)
-|   |-- Shell.tsx  (148)
+|   |-- RunProgress.tsx  (27)
+|   |-- Shell.tsx  (154)
 |   |-- SyncProvider.tsx  (148)
 |   `-- UsageBanner.tsx  (43)
 |-- docs/   # generated documentation
@@ -113,6 +115,7 @@ cross-device sync.
 |   |-- auth.ts  (160)
 |   |-- claimCheck.ts  (75)
 |   |-- claudePrompt.ts  (110)
+|   |-- clipboard.ts  (36)
 |   |-- companyBoards.ts  (526)
 |   |-- gemini.ts  (473)
 |   |-- inboxFilters.ts  (56)
@@ -123,7 +126,7 @@ cross-device sync.
 |   |-- openTabs.ts  (51)
 |   |-- otp.ts  (51)
 |   |-- outcomes.ts  (212)
-|   |-- pool.ts  (68)
+|   |-- pool.ts  (87)
 |   |-- prompts.ts  (820)
 |   |-- quota.ts  (85)
 |   |-- rateLimit.ts  (79)
@@ -133,7 +136,8 @@ cross-device sync.
 |   |-- stableJson.ts  (22)
 |   |-- store.ts  (694)
 |   |-- syncMerge.ts  (211)
-|   `-- types.ts  (351)
+|   |-- types.ts  (351)
+|   `-- useCancellable.ts  (26)
 |-- scripts/   # repo tooling — run with plain node, no npm
 |   |-- hooks/
 |   |   |-- after-edit.mjs  (63)
@@ -171,19 +175,19 @@ cross-device sync.
 | URL | File | Lines |
 | --- | --- | --- |
 | `/` | [app/page.tsx](../app/page.tsx) | 318 |
-| `/auto-apply` | [app/auto-apply/page.tsx](../app/auto-apply/page.tsx) | 595 |
-| `/autopilot` | [app/autopilot/page.tsx](../app/autopilot/page.tsx) | 848 |
-| `/evolve` | [app/evolve/page.tsx](../app/evolve/page.tsx) | 496 |
-| `/github` | [app/github/page.tsx](../app/github/page.tsx) | 243 |
-| `/inbox` | [app/inbox/page.tsx](../app/inbox/page.tsx) | 543 |
-| `/interview` | [app/interview/page.tsx](../app/interview/page.tsx) | 352 |
-| `/jobs` | [app/jobs/page.tsx](../app/jobs/page.tsx) | 748 |
+| `/auto-apply` | [app/auto-apply/page.tsx](../app/auto-apply/page.tsx) | 605 |
+| `/autopilot` | [app/autopilot/page.tsx](../app/autopilot/page.tsx) | 864 |
+| `/evolve` | [app/evolve/page.tsx](../app/evolve/page.tsx) | 491 |
+| `/github` | [app/github/page.tsx](../app/github/page.tsx) | 241 |
+| `/inbox` | [app/inbox/page.tsx](../app/inbox/page.tsx) | 554 |
+| `/interview` | [app/interview/page.tsx](../app/interview/page.tsx) | 428 |
+| `/jobs` | [app/jobs/page.tsx](../app/jobs/page.tsx) | 757 |
 | `/login` | [app/login/page.tsx](../app/login/page.tsx) | 227 |
-| `/outreach` | [app/outreach/page.tsx](../app/outreach/page.tsx) | 431 |
-| `/practice` | [app/practice/page.tsx](../app/practice/page.tsx) | 257 |
-| `/referrals` | [app/referrals/page.tsx](../app/referrals/page.tsx) | 327 |
-| `/resume` | [app/resume/page.tsx](../app/resume/page.tsx) | 493 |
-| `/tailor` | [app/tailor/page.tsx](../app/tailor/page.tsx) | 324 |
+| `/outreach` | [app/outreach/page.tsx](../app/outreach/page.tsx) | 427 |
+| `/practice` | [app/practice/page.tsx](../app/practice/page.tsx) | 269 |
+| `/referrals` | [app/referrals/page.tsx](../app/referrals/page.tsx) | 319 |
+| `/resume` | [app/resume/page.tsx](../app/resume/page.tsx) | 494 |
+| `/tailor` | [app/tailor/page.tsx](../app/tailor/page.tsx) | 351 |
 | `/validate` | [app/validate/page.tsx](../app/validate/page.tsx) | 307 |
 
 ## API routes
@@ -244,8 +248,10 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | --- | --- | --- | --- |
 | [app/error.tsx](../app/error.tsx) | 45 | Error | 0 |
 | [app/layout.tsx](../app/layout.tsx) | 24 | RootLayout, metadata | 0 |
+| [components/CopyButton.tsx](../components/CopyButton.tsx) | 42 | CopyButton | 5 |
 | [components/Pager.tsx](../components/Pager.tsx) | 123 | Pager, usePaged | 6 |
-| [components/Shell.tsx](../components/Shell.tsx) | 148 | Shell | 1 |
+| [components/RunProgress.tsx](../components/RunProgress.tsx) | 27 | RunProgress | 4 |
+| [components/Shell.tsx](../components/Shell.tsx) | 154 | Shell | 1 |
 | [components/SyncProvider.tsx](../components/SyncProvider.tsx) | 148 | SyncBadge, SyncProvider | 1 |
 | [components/UsageBanner.tsx](../components/UsageBanner.tsx) | 43 | UsageBanner | 1 |
 | [lib/aiCache.ts](../lib/aiCache.ts) | 61 | cacheKey, readCache, writeCache | 1 |
@@ -254,6 +260,7 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | [lib/auth.ts](../lib/auth.ts) | 160 | OTP_COOKIE, OTP_MAX_ATTEMPTS, SESSION_COOKIE, SESSION_MAX_AGE_MS, SessionInfo, createSessionToken, generateNonce, generateOtpCode, +6 | 7 |
 | [lib/claimCheck.ts](../lib/claimCheck.ts) | 75 | ClaimReport, confirmMarkers, describeClaims, newClaims | 2 |
 | [lib/claudePrompt.ts](../lib/claudePrompt.ts) | 110 | ClaudePromptInput, buildClaudeStrategyPrompt | 1 |
+| [lib/clipboard.ts](../lib/clipboard.ts) | 36 | copyText | 2 |
 | [lib/companyBoards.ts](../lib/companyBoards.ts) | 526 | BoardListing, COMPANY_BOARDS, CompanyBoard, htmlToText, jdExcerpt, matchesRole, searchCompanyBoards | 1 |
 | [lib/gemini.ts](../lib/gemini.ts) | 473 | Generated, STREAM_ERROR, STREAM_META, Tier, geminiJson, geminiStream, geminiText, pacificDay, +1 | 1 |
 | [lib/inboxFilters.ts](../lib/inboxFilters.ts) | 56 | isTransactional, trimForStorage | 1 |
@@ -265,7 +272,7 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | [lib/otp.ts](../lib/otp.ts) | 51 | OTP_TTL_SEC, OtpResult, issueOtp, verifyOtp | 2 |
 | [lib/outcomes.ts](../lib/outcomes.ts) | 212 | BreakdownRow, Funnel, TrackedApplication, applicationStamp, applicationsAt, breakdown, channelOf, funnelOf, +6 | 6 |
 | [lib/pdf/resumeDoc.tsx](../lib/pdf/resumeDoc.tsx) | 261 | ResumeTemplate, buildLetterPdf, buildResumePdf, downloadBlob, parseResume | 5 |
-| [lib/pool.ts](../lib/pool.ts) | 68 | AI_CONCURRENCY, PoolOutcome, mapPool | 4 |
+| [lib/pool.ts](../lib/pool.ts) | 87 | AI_CONCURRENCY, PoolOutcome, mapPool | 4 |
 | [lib/prompts.ts](../lib/prompts.ts) | 820 | SYSTEM_BASE, TaskDef, TaskTier, systemBase, tasks | 1 |
 | [lib/quota.ts](../lib/quota.ts) | 85 | QuotaInfo, quota | 4 |
 | [lib/rateLimit.ts](../lib/rateLimit.ts) | 79 | RateLimitResult, clientIp, rateLimit, rateLimitPair | 3 |
@@ -276,6 +283,7 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | [lib/store.ts](../lib/store.ts) | 694 | defaultProfile, defaultStats, defaultStrategy, store, sync | 17 |
 | [lib/syncMerge.ts](../lib/syncMerge.ts) | 211 | COLLECTION_ID, Envelope, IncomingEntry, ListPatch, MAX_CLOCK_SKEW_MS, Resolution, TOMBSTONE_TTL_MS, Tombstones, +7 | 2 |
 | [lib/types.ts](../lib/types.ts) | 351 | AutoTailorPlan, DismissedJob, ImprovementBrief, InboxCursor, InboxMessage, Job, MailCategory, OUTCOME_STAGES, +21 | 19 |
+| [lib/useCancellable.ts](../lib/useCancellable.ts) | 26 | useCancellable | 4 |
 | [middleware.ts](../middleware.ts) | 36 | config, middleware | 0 |
 | [next.config.mjs](../next.config.mjs) | 59 | — | 0 |
 | [postcss.config.mjs](../postcss.config.mjs) | 10 | — | 0 |
