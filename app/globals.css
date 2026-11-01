@@ -1,6 +1,51 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/*
+ * Tailwind 4 reads its theme from here; there is no tailwind.config any more.
+ *
+ * ink-400 was #64748b, about 4:1 on these backgrounds and under the 4.5:1 that
+ * small text needs, and it is the colour of most secondary text in the app.
+ * ink-500 and neon-300 were used in the markup but never defined, so those classes
+ * silently did nothing.
+ */
+@theme {
+  --color-ink-950: #0a0e17;
+  --color-ink-900: #0e1422;
+  --color-ink-850: #131a2b;
+  --color-ink-800: #182136;
+  --color-ink-700: #233049;
+  --color-ink-600: #31415f;
+  --color-ink-500: #6b7a92;
+  --color-ink-400: #8a99af;
+  --color-ink-300: #a3b1c4;
+  --color-ink-200: #cbd5e1;
+  --color-ink-100: #e7edf5;
+
+  --color-neon-300: #7ff0cf;
+  --color-neon-400: #34e3b0;
+  --color-neon-500: #17c996;
+  --color-neon-600: #0ea87c;
+
+  --color-amberx-400: #ffc45e;
+  --color-amberx-500: #f5a623;
+
+  --color-coral-400: #ff7a6b;
+  --color-coral-500: #f4553f;
+
+  --color-sky2-400: #5db3ff;
+  --color-sky2-500: #2f8fef;
+
+  --shadow-glow: 0 0 24px rgba(23, 201, 150, 0.18);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+/* `inline` because next/font sets these on <body>, and a value resolved at :root
+   would come out empty. */
+@theme inline {
+  --font-display: var(--next-font-display), system-ui, sans-serif;
+  --font-body: var(--next-font-body), system-ui, sans-serif;
+  --font-mono: var(--next-font-mono), ui-monospace, monospace;
+}
 
 @layer base {
   html {
@@ -8,16 +53,30 @@
   }
   body {
     @apply bg-ink-950 text-ink-100 font-body antialiased;
-    background-image: radial-gradient(
-        ellipse 80% 50% at 20% -10%,
-        rgba(23, 201, 150, 0.08),
-        transparent
-      ),
-      radial-gradient(ellipse 60% 40% at 90% 0%, rgba(47, 143, 239, 0.06), transparent);
+    background-image:
+      radial-gradient(ellipse 80% 50% at 20% -10%, rgba(23, 201, 150, 0.07), transparent),
+      radial-gradient(ellipse 60% 40% at 90% 0%, rgba(47, 143, 239, 0.05), transparent);
     background-attachment: fixed;
+  }
+  /* Tailwind 4 changed both of these defaults. */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-ink-700);
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  summary,
+  select {
+    cursor: pointer;
   }
   ::selection {
     @apply bg-neon-500/30;
+  }
+  /* Keyboard users could not see where they were on most controls. */
+  :focus-visible {
+    outline: 2px solid var(--color-neon-400);
+    outline-offset: 2px;
   }
   ::-webkit-scrollbar {
     width: 10px;
@@ -29,48 +88,100 @@
   ::-webkit-scrollbar-track {
     @apply bg-transparent;
   }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
+/*
+ * Components stay plain selectors in this layer rather than @utility, so a page's
+ * `text-xs px-3 py-1.5` still beats the base button size. Tailwind 4 also cannot
+ * @apply one custom class from another, hence the grouped selectors.
+ */
 @layer components {
-  .card {
-    @apply bg-ink-900/80 border border-ink-700/60 rounded-2xl shadow-card backdrop-blur-sm;
+  .card,
+  .card-pad {
+    @apply bg-ink-900/90 border border-ink-700/60 rounded-2xl shadow-card;
   }
   .card-pad {
-    @apply card p-5 md:p-6;
+    @apply p-5 md:p-6;
   }
-  .btn {
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed select-none;
   }
   .btn-primary {
-    @apply btn bg-neon-500 text-ink-950 hover:bg-neon-400 hover:shadow-glow active:scale-[0.98];
+    @apply bg-neon-500 text-ink-950 hover:bg-neon-400 hover:shadow-glow active:scale-[0.98];
   }
   .btn-secondary {
-    @apply btn bg-ink-800 text-ink-100 border border-ink-600/60 hover:bg-ink-700 active:scale-[0.98];
+    @apply bg-ink-800 text-ink-100 border border-ink-600/60 hover:bg-ink-700 active:scale-[0.98];
   }
   .btn-danger {
-    @apply btn bg-coral-500/15 text-coral-400 border border-coral-500/30 hover:bg-coral-500/25;
+    @apply bg-coral-500/15 text-coral-400 border border-coral-500/30 hover:bg-coral-500/25;
   }
   .input {
-    @apply w-full rounded-xl bg-ink-850 border border-ink-700/70 px-3.5 py-2.5 text-sm text-ink-100 placeholder:text-ink-400/70 focus:outline-none focus:border-neon-500/60 focus:ring-2 focus:ring-neon-500/20 transition;
+    @apply w-full rounded-xl bg-ink-850 border border-ink-700/70 px-3.5 py-2.5 text-sm text-ink-100 placeholder:text-ink-400/70 focus:outline-hidden focus:border-neon-500/60 focus:ring-2 focus:ring-neon-500/20 transition;
   }
   .label {
     @apply block text-xs font-semibold uppercase tracking-wider text-ink-300 mb-1.5;
   }
-  .badge {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-wide;
+  .badge,
+  .badge-green,
+  .badge-amber,
+  .badge-red,
+  .badge-blue {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-wide border;
   }
   .badge-green {
-    @apply badge bg-neon-500/15 text-neon-400 border border-neon-500/25;
+    @apply bg-neon-500/15 text-neon-400 border-neon-500/25;
   }
   .badge-amber {
-    @apply badge bg-amberx-500/15 text-amberx-400 border border-amberx-500/25;
+    @apply bg-amberx-500/15 text-amberx-400 border-amberx-500/25;
   }
   .badge-red {
-    @apply badge bg-coral-500/15 text-coral-400 border border-coral-500/25;
+    @apply bg-coral-500/15 text-coral-400 border-coral-500/25;
   }
   .badge-blue {
-    @apply badge bg-sky2-500/15 text-sky2-400 border border-sky2-500/25;
+    @apply bg-sky2-500/15 text-sky2-400 border-sky2-500/25;
   }
+
+  /* Messages. One rule each, instead of the same eleven classes on 40 elements. */
+  .alert-error,
+  .alert-success,
+  .alert-warn,
+  .alert-info {
+    @apply rounded-xl border px-4 py-3 leading-relaxed;
+  }
+  .alert-error {
+    @apply text-sm text-coral-400 bg-coral-500/10 border-coral-500/25;
+  }
+  .alert-success {
+    @apply text-sm text-neon-400 bg-neon-500/10 border-neon-500/25;
+  }
+  .alert-warn {
+    @apply text-xs text-amberx-400 bg-amberx-500/10 border-amberx-500/25;
+  }
+  .alert-info {
+    @apply text-xs text-ink-300 bg-sky2-500/10 border-sky2-500/25;
+  }
+
+  /* Toggle pills: the on and off states every filter row shares. */
+  .chip-on {
+    @apply bg-neon-500/15 text-neon-400 border-neon-500/40;
+  }
+  .chip-off {
+    @apply bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200;
+  }
+
   .h1 {
     @apply font-display text-2xl md:text-3xl font-bold tracking-tight text-ink-100;
   }
@@ -87,7 +198,7 @@
   /* Narrow, self-effacing scrollbar for the sidebar and menu. */
   .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: theme("colors.ink.700") transparent;
+    scrollbar-color: var(--color-ink-700) transparent;
   }
   .scroll-thin::-webkit-scrollbar {
     width: 6px;

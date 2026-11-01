@@ -13,7 +13,7 @@ export default function RunProgress({
     <div
       role="status"
       aria-live="polite"
-      className="flex items-center gap-3 text-sm text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3"
+      className="flex items-center gap-3 alert-success"
     >
       <span className="animate-pulse flex-1">{text}</span>
       {onStop && (

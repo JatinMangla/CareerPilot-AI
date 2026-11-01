@@ -209,18 +209,25 @@ export default function InterviewPage() {
     const historyText = turns
       .map((t) => `${t.role === "ai" ? "INTERVIEWER" : "CANDIDATE"}: ${t.text}`)
       .join("\n\n");
+    // Held like a turn, so "New interview" stops it: it used to keep streaming and
+    // write the old report into the next session.
+    turnAbort.current?.abort();
+    const ctrl = new AbortController();
+    turnAbort.current = ctrl;
     try {
       await streamTask(
         "interview_feedback",
         { history: historyText, profile: store.getProfile() },
-        (full) => setFeedback(full),
-        { allowIncomplete: true }
+        (full) => {
+          if (!ctrl.signal.aborted) setFeedback(full);
+        },
+        { allowIncomplete: true, signal: ctrl.signal }
       );
-      store.bumpStat("interviews");
+      if (!ctrl.signal.aborted) store.bumpStat("interviews");
     } catch (err: any) {
-      setError(err.message);
+      if (!ctrl.signal.aborted) setError(err.message);
     } finally {
-      setBusy(false);
+      if (turnAbort.current === ctrl) setBusy(false);
     }
   }
 
@@ -250,7 +257,7 @@ export default function InterviewPage() {
           </p>
         </div>
         {error && (
-          <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+          <div className="alert-error">
             {error}
           </div>
         )}
@@ -306,7 +313,7 @@ export default function InterviewPage() {
       </div>
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}

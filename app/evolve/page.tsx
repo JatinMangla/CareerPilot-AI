@@ -19,8 +19,6 @@ export default function EvolvePage() {
   const [claudePrompt, setClaudePrompt] = useState("");
   const [claudeReply, setClaudeReply] = useState("");
   const [merging, setMerging] = useState(false);
-  const [skillsText, setSkillsText] = useState("");
-  const [profileSaved, setProfileSaved] = useState(false);
 
   /**
    * Versions from the stored strategy, not the one this render started with —
@@ -41,9 +39,7 @@ export default function EvolvePage() {
   useEffect(() => {
     setStrategy(store.getStrategy());
     setStats(store.getStats());
-    const p = store.getProfile();
-    setProfile(p);
-    setSkillsText(p.skills.join(", "));
+    setProfile(store.getProfile());
   }, []);
 
   async function evolve() {
@@ -72,12 +68,6 @@ export default function EvolvePage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function saveProfile() {
-    if (!profile) return;
-    setProfileSaved(store.setProfile(profile) !== false);
-    setTimeout(() => setProfileSaved(false), 2500);
   }
 
   /**
@@ -186,7 +176,7 @@ export default function EvolvePage() {
       </div>
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}
@@ -228,7 +218,7 @@ export default function EvolvePage() {
         </div>
 
         {justEvolved && (
-          <div className="text-sm text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3">
+          <div className="alert-success">
             ✓ Evolved to v{strategy?.version}. Every AI feature now runs with the upgraded
             strategy.
           </div>
@@ -325,166 +315,6 @@ export default function EvolvePage() {
         </div>
       </div>
 
-      {/* Profile settings */}
-      {profile && (
-        <div className="card-pad space-y-4">
-          <h2 className="h2">My profile (used in every AI task)</h2>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="label" htmlFor="evolve-name">Name</label>
-              <input id="evolve-name"
-                className="input"
-                value={profile.name}
-                onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="evolve-current-role">Current role</label>
-              <input id="evolve-current-role"
-                className="input"
-                value={profile.role}
-                onChange={(e) => setProfile({ ...profile, role: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="evolve-desired-roles">Desired roles</label>
-              <input id="evolve-desired-roles"
-                className="input"
-                value={profile.desiredRoles}
-                onChange={(e) => setProfile({ ...profile, desiredRoles: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="evolve-locations">Locations</label>
-              <input id="evolve-locations"
-                className="input"
-                value={profile.locations}
-                onChange={(e) => setProfile({ ...profile, locations: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="profile-years">
-                Years of professional experience
-              </label>
-              <input
-                id="profile-years"
-                className="input"
-                type="number"
-                min={0}
-                max={50}
-                step={0.5}
-                placeholder="e.g. 4.5"
-                value={profile.yearsExperience ?? ""}
-                onChange={(e) =>
-                  setProfile({
-                    ...profile,
-                    yearsExperience: e.target.value === "" ? undefined : Number(e.target.value),
-                  })
-                }
-              />
-              <p className="text-[11px] text-ink-500 mt-1">
-                Decides which levels job search treats as a fit, and how the AI scores seniority.
-              </p>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="label" htmlFor="profile-skills">
-                Skills (comma-separated)
-              </label>
-              {/* Edited as raw text: rebuilding it from the parsed list on every
-                  keystroke deleted a trailing comma, so no new skill could be typed. */}
-              <input
-                id="profile-skills"
-                className="input"
-                value={skillsText}
-                onChange={(e) => {
-                  setSkillsText(e.target.value);
-                  setProfile({
-                    ...profile,
-                    skills: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
-                  });
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-ink-800">
-            <h3 className="font-display font-bold text-sm text-ink-100 mb-1">
-              Application form details
-            </h3>
-            <p className="text-xs text-ink-400 mb-3">
-              Auto-Pilot fills these into company application forms. Blank fields are left
-              for you to complete, so filling them here means fewer manual steps.
-            </p>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div>
-                <label className="label" htmlFor="evolve-phone">Phone</label>
-                <input id="evolve-phone"
-                  className="input"
-                  placeholder="+91 98765 43210"
-                  value={profile.phone || ""}
-                  onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="label" htmlFor="evolve-linkedin-url">LinkedIn URL</label>
-                <input id="evolve-linkedin-url"
-                  className="input"
-                  placeholder="https://linkedin.com/in/…"
-                  value={profile.linkedin || ""}
-                  onChange={(e) => setProfile({ ...profile, linkedin: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="label" htmlFor="evolve-github-url">GitHub URL</label>
-                <input id="evolve-github-url"
-                  className="input"
-                  placeholder="https://github.com/JatinMangla"
-                  value={profile.github || ""}
-                  onChange={(e) => setProfile({ ...profile, github: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="label" htmlFor="evolve-portfolio-website">Portfolio / website</label>
-                <input id="evolve-portfolio-website"
-                  className="input"
-                  placeholder="https://…"
-                  value={profile.portfolio || ""}
-                  onChange={(e) => setProfile({ ...profile, portfolio: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="label" htmlFor="evolve-notice-period">Notice period</label>
-                <input id="evolve-notice-period"
-                  className="input"
-                  placeholder="e.g. 30 days / Immediate"
-                  value={profile.noticePeriod || ""}
-                  onChange={(e) => setProfile({ ...profile, noticePeriod: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="label" htmlFor="evolve-expected-ctc">Expected CTC</label>
-                <input id="evolve-expected-ctc"
-                  className="input"
-                  placeholder="e.g. ₹12 LPA"
-                  value={profile.expectedCtc || ""}
-                  onChange={(e) => setProfile({ ...profile, expectedCtc: e.target.value })}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button className="btn-primary" onClick={saveProfile}>
-              Save profile
-            </button>
-            {profileSaved && (
-              <span role="status" className="text-xs text-neon-400">
-                ✓ Saved — every AI task uses it from now on.
-              </span>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

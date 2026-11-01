@@ -9,15 +9,17 @@ how the non-obvious systems (auth, sync, AI streaming, job scoring, outcomes) wo
 items. **Update its "Open items" and "Change log" whenever you finish work.**
 
 **Read [.claude/repo-map.md](.claude/repo-map.md) before exploring.** It is generated from the
-source and lists every page, API route, AI task and module with its importers. It costs ~2.7k
+source and lists every page, API route, AI task and module with its importers. It costs ~3.8k
 tokens and saves far more than that in grepping. If it looks out of date, run
 `node scripts/repo-map.mjs`.
 
 ## Stack
 
-Next.js 16 (App Router, Turbopack) · React 19 · TypeScript · Tailwind 3 · deployed on Vercel.
-The route gate is `proxy.ts` (Next 16's name for middleware, running on Node.js).
+Next.js 16 (App Router, Turbopack) · React 19 · TypeScript · Tailwind 4 · deployed on Vercel.
+The route gate is `proxy.ts` (Next 16's name for middleware, running on Node.js). It also sets
+the per-request CSP nonce, which is why the root layout renders dynamically.
 `cookies()` is async: always `await cookies()`.
+Theme tokens live in `app/globals.css` under `@theme`; there is no `tailwind.config`.
 API routes under `app/api/` are the entire backend — there is no separate server.
 Google Gemini free tier is the **sole** AI provider.
 State lives in browser localStorage, mirrored to Upstash Redis for cross-device sync.
@@ -48,7 +50,9 @@ node node_modules/next/dist/bin/next dev  # run the app
 - **Never run `next lint` / `npm run lint`.** There is no ESLint config, so it drops into an
   interactive setup prompt and hangs a non-interactive shell.
 - Local node is v20; `package.json` pins `engines.node: "24.x"` for Vercel's build. Do not use
-  APIs newer than Node 20 in scripts.
+  APIs newer than Node 20 in scripts. A dependency that needs Node 22 can still pass the build
+  and only fail at runtime here: `unpdf` is held at 1.8.1 for that reason.
+- **`typescript` stays on 5.9.** Version 7 has no JS API, and `next build` needs one.
 - `find` and `ls -R` walk `agent/node_modules` (Playwright, ~200 files). Use
   `node scripts/tree.mjs`, or the Glob/Grep tools, which respect ignores.
 
@@ -88,8 +92,8 @@ when Redis is not configured.
   user's account. The agent has a hard blocklist and only opens company ATS boards
   (Greenhouse, Lever, Ashby, Workable).
 - **AI-invented job listings must never reach the apply pipeline.** `isVerifiedSource`
-  gates this, and `app/jobs/page.tsx` re-stamps `id`/`url`/`source` from the fetched
-  listing after scoring so the model cannot launder a guess into a verified source.
+  gates this in both Apply tabs, and `app/jobs/page.tsx` re-stamps `id`/`url`/`source` from the
+  fetched listing after scoring so the model cannot launder a guess into a verified source.
 - **Paid/republisher job sites are never shown.** `BLOCKED_JOB_HOSTS` in `lib/jobFilters.ts`
   (bebee.com and friends) — they wall the application behind a payment or signup.
 - **Job identity is `fingerprint()`, not `id`.** Every search mints new ids, so dedupe and

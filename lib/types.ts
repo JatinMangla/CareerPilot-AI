@@ -244,6 +244,12 @@ export interface QueuedApplication {
   finalResume: string;
   error?: string;
   at: number;
+  /**
+   * Numbers and technologies in the tailored resume that the source resume does
+   * not have, found by lib/claimCheck.ts. The model is told to keep these out of
+   * `safeChanges`; this catches the ones it did not.
+   */
+  claimNote?: string;
   /* Outcome tracking, as on PreparedApplication — Auto-Pilot sends count too. */
   outcome?: OutcomeStage;
   outcomeAt?: number;
@@ -272,6 +278,8 @@ export interface InboxCursor {
 
 export interface InboxMessage {
   uid: string;
+  /** The RFC Message-ID, so a reply lands in the sender's existing thread. */
+  messageId?: string;
   from: string;
   fromName: string;
   fromAddress: string;
@@ -299,6 +307,10 @@ export interface OutreachDraft {
   role?: string;
   company?: string;
   context?: string;
+  /* Set when this answers a mail in the Job Inbox. */
+  inReplyTo?: string;
+  replySubject?: string;
+  inboxUid?: string;
 }
 
 export interface SentEmail {

@@ -98,7 +98,7 @@ function build() {
 
   push("## What this is");
   push("");
-  push("Single-user AI career copilot. Next.js 14 App Router + TypeScript + Tailwind, deployed on");
+  push("Single-user AI career copilot. Next.js 16 App Router + TypeScript + Tailwind 4, deployed on");
   push("Vercel. API routes are the entire backend. Google Gemini (free tier) is the sole AI");
   push("provider. User state lives in browser localStorage, mirrored to Upstash Redis for");
   push("cross-device sync.");

@@ -5,21 +5,17 @@ standing rules; this file says **where the project is now, how the non-obvious s
 and what is still open**. Update the "Open items" and "Change log" sections whenever you finish
 a piece of work, so this stays true.
 
-_Last updated: 2026-09-26_
+_Last updated: 2026-11-01_
 
 ---
 
 ## Current state in one paragraph
 
-The app works end to end. On 2026-09-24 an adversarial audit found four problems:
-
-- A weak login protecting full Gmail access.
-- Several ways sync lost data silently.
-- Job matching that scored listings from their title alone.
-- No record of which applications produced replies.
-
-All four were fixed and verified in one rework, described below. What remains is a Next.js
-major upgrade, a real-Redis check of the sync script, and some UI consolidation (see Open items).
+The app works end to end. On 2026-09-24 an adversarial audit found four problems: a weak login
+protecting Gmail access, silent data loss in sync, job matching from titles alone, and no record
+of which applications produced replies. All four were fixed. A second full review on 2026-11-01
+patched a critical Next.js advisory and fixed the bugs listed in the change log below. Nothing
+from that review is deployed until it is committed and pushed (see Open items).
 
 ---
 
@@ -43,8 +39,22 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
     `cp:session:epoch`, which "Sign out everywhere" bumps to end every session.
   - Revocation only works when Redis is configured.
 - **Rate limits:** `rateLimitPair()` applies a per-IP bucket (from `x-real-ip`) and a global
-  one. The email-code routes fail closed without Redis; password login fails open.
+  one. The email-code routes fail closed without Redis; password login fails open. Codes also
+  have a daily cap of 30, which holds an attacker to 150 guesses a day.
 - More than 15 wrong codes in a day triggers an alert email to the owner.
+- `/api/auth/*` is public, so its errors name no configuration and no address. Details go to
+  the server log.
+
+### Content-Security-Policy: `proxy.ts`
+
+- The CSP is built per request around a nonce, so an injected script does not run. The root layout
+  calls `await connection()`, which makes every page render per request: a prerendered page has
+  no nonce and all its scripts would be blocked.
+- `'wasm-unsafe-eval'` is enough for `@react-pdf`. `'unsafe-eval'` is development only.
+- `connect-src` includes `data:` because `@react-pdf` fetches its WebAssembly from a data URL. It
+  falls back if refused, so PDFs still work, but every export logged a CSP violation.
+- `img-src` is limited to GitHub avatars. `https:` at large was a way to send data out.
+- Other security headers stay in `next.config.mjs`.
 
 ### Cross-device sync: `lib/store.ts` (browser), `app/api/state/route.ts`, `lib/syncMerge.ts`, `lib/kv.ts`
 
@@ -61,7 +71,13 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
     hashes stored at the last sync (`cp_sync_base`).
   - The server applies the patch to whatever it holds, so two devices editing different items
     both survive. Removals leave tombstones for 60 days.
+  - A real diff made after a removal lifts the tombstone, so adding an item back on purpose
+    works. A `full` upload never does. If a tombstone refuses an item, the device is sent the
+    merged list instead of keeping something no other device will see.
   - A new list key needs an entry in `COLLECTION_ID`.
+- **`pull()` reads local state only after its last await.** It used to read `cp_sync_dirty` before
+  the download, so an edit made during the download was overwritten and never synced.
+- `/api/state` accepts only `cp_*` keys that are not device-only.
 - **Writes are atomic:** a Lua compare-and-set via `EVAL`. If `EVAL` fails, the route falls back
   to an unguarded write that still bumps revisions.
 - **Pull is two steps:** `GET ?revs=1` (cheap), then `GET ?keys=a,b` for only the keys that moved.
@@ -73,8 +89,13 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
 ### AI calls: `lib/gemini.ts`, `lib/aiClient.ts`, `app/api/ai/route.ts`, `lib/prompts.ts`
 
 - **Model fallback:** each tier is a chain of models. On a 429 the call moves to the next model
-  instead of retrying. Every call has a 90s timeout, and the browser's abort signal cancels
-  the upstream call. The API key travels in the `x-goog-api-key` header.
+  instead of retrying. So does a 404, which is how Google retires a model, and JSON cut off by
+  `MAX_TOKENS`. Non-streaming calls have a 90s timeout; streams have a 90s gap limit, because a
+  total limit cut off long rewrites mid-token. The browser's abort signal cancels the upstream
+  call. The API key travels in the `x-goog-api-key` header.
+- **Which models:** do not add a model because it is newest. On 2026-11-01 `gemini-3.8-flash`
+  timed out on 2 of 3 calls and `3.7` on 1 of 3 plus two 503s, while `3.5` answered every time in
+  about 5s. Trial with three real calls first.
 - **Stream trailer:** every stream ends with one marker, which `streamTask` strips.
   - `[[CP_META:{model,fallback,finish}]]` ends a normal stream.
   - `[[CP_ERROR:msg]]` ends a failed one.
@@ -98,9 +119,17 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
 
 - **Sources:** 121 company boards (Greenhouse, Lever, Ashby) plus JSearch and Adzuna.
   - Board lists are cached for 30 min through Next's fetch data cache; responses over 2MB are
-    not cached.
+    not cached, which logs a harmless "Failed to set Next.js data cache" line per large board.
   - Board fetching stops starting new requests at 32s so the search stays inside the 60s
-    function limit.
+    function limit. Aggregator requests get 28s: JSearch takes about 15s for three pages, and at
+    a 15s limit most phrasings timed out silently.
+  - Lever's `allLocations` and Ashby's `secondaryLocations` are matched as well as the primary
+    location, and the office that matched is the one shown.
+  - `source` comes from the company (`yc-boards` when `yc: true`), not from the filter that ran.
+    The boards filter includes YC jobs; the YC filter is the narrower view.
+  - The response's `warnings` names any aggregator that failed or is not configured.
+- **Saved list:** `pruneJobs` keeps it to 600. Anything queued, prepared or with a referral plan
+  is never dropped; next go stale quick-scored listings, then the lowest value.
 - **Descriptions:** Lever and Ashby descriptions come in the list. Greenhouse descriptions are
   fetched per job, for the shortlist only. `jdExcerpt` keeps the requirements part.
 - **Matching:**
@@ -118,8 +147,13 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
 ### Outcomes loop: `lib/outcomes.ts`
 
 - **What is recorded:** Apply Kits (`cp_apps`) and Auto-Pilot (`cp_queue`) applications are
-  joined. Marking one applied or submitted stamps `source`, `matchScore` and `resumeVersion`
+  joined. `source` and `matchScore` are stamped when the application is prepared, since the job
+  may leave the list before it is sent. Marking one applied or submitted stamps `resumeVersion`
   (the resume's `updatedAt`).
+- **Applied jobs:** `appliedKeys()` in `lib/today.ts` matches by fingerprint across both flows, so
+  a job sent one way is not offered the other way, under any id.
+- **Today:** `buildToday()` in `lib/today.ts` turns stored state into the dashboard's action list.
+  It is pure and tested.
 - **Dashboard:** shows the funnel plus reply rates by channel, match score band and resume
   version.
 - **Inbox:** an `applied_reply` offers one-click stage updates for the matching application.
@@ -127,7 +161,13 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
 
 ### Inbox: `app/inbox/page.tsx`, `lib/inboxFilters.ts`, `app/api/inbox/sync/route.ts`
 
-- IMAP fetch is capped at 200KB per message, so attachments are not downloaded.
+- IMAP opens the mailbox read-only (EXAMINE) and fetches at most 200KB per message, so
+  attachments are not downloaded.
+- It fetches in chunks of 20 and stops starting new ones at 42s. The cursor moves only past a
+  finished chunk, so any stop resumes exactly where it left off.
+- `messageId` is stored so "Reply with AI" threads in the sender's conversation, and sending
+  the reply marks the mail handled.
+- `cp_inbox` syncs to Redis like every other list. Mail is not held only in the browser.
 - `isTransactional()` files bank, OTP and receipt mail locally without sending it to the AI.
   Anything that mentions a job is never filtered this way.
 - Mail that has already been classified is never re-sent. `trimForStorage` caps storage at 800
@@ -149,8 +189,9 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
 
 ## Verification tooling
 
-- `node scripts/check.mjs` runs typecheck, the token budget, the 28 unit tests in `tests/`, and
+- `node scripts/check.mjs` runs typecheck, the token budget, the unit tests in `tests/`, and
   the build. Use `--fast` to skip the build.
+  - `tests/gemini.test.mjs` stubs `fetch` to cover the model chain and stream trailers.
   - `next build` fails from bash with ENOTFOUND on Google Fonts; run it through PowerShell.
 - Unit tests compile the pure `lib/` modules with the installed `tsc` (`--noCheck`) and run
   `node --test`. No npm install is needed.
@@ -159,7 +200,10 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
   `next start` with `UPSTASH_REDIS_REST_URL=http://localhost:<port>`.
   - This was done on 2026-09-24 and all 16 end-to-end checks passed: code lockout, single-use
     codes, per-IP limits, revocation, per-item merge, sticky removals, stale-value refusal.
-  - The fake server is not committed; rebuild it from this description if needed.
+  - The fake server is not committed; rebuild it from this description if needed. `EVAL` arrives
+    as `[script, numkeys, key1, key2, ...args]`.
+- **The sync race** can be reproduced with Playwright's `page.route`: hold `GET ?keys=` open, save
+  a change, then release it. No Redis is needed.
 - **Browser checks without installing anything:** `agent/node_modules` already has Playwright.
   1. Build via PowerShell.
   2. Run `next start -p 3123`.
@@ -186,13 +230,26 @@ major upgrade, a real-Redis check of the sync script, and some UI consolidation 
 
 ## Open items
 
-None as of 2026-09-26. Everything from the 2026-09-24 audit is done and deployed.
+- **Deploy the 2026-11-01 work.** Production still runs Next 16.3.6, which is in the range of a
+  critical advisory. Nothing is fixed there until this work is committed and pushed.
+- **Not exercised on 2026-11-01:** a real Gmail read or send on imapflow 2 and nodemailer 10 (no
+  local credentials; both libraries load, and the code uses only `connect`, `search`, `fetch` and
+  `sendMail`), and the emailed login code path with its new daily cap (it would email the owner).
+  After deploying, sync the inbox once, send one test email, and sign in with a code.
+- **Production logs were not read.** The Vercel connector and the local CLI both lack access to the
+  `jatinmanglas-projects` scope.
+
+Versions held back on purpose:
+
+- **`typescript` 5.9, not 7.** The 7.0 package has no `createProgram`, and `next build` calls
+  `typescript.createIncrementalProgram`. Revisit when Next supports it.
+- **`unpdf` pinned to 1.8.1, not 1.9+ or 2.x.** Those need the `Iterator` global from Node 22, so
+  PDF upload throws on local Node 20. It would work on Vercel. Move up when local node does.
 
 Standing notes for future work, not defects:
 
-- **CSP:** it still allows `'unsafe-inline'` and `'unsafe-eval'`. `@react-pdf` needs eval, and a
-  nonce would force every page to render dynamically. PDF export was verified working under this
-  CSP on Next 16. Revisit only if PDF generation moves to the server.
+- **`npm audit` (dev):** the remaining advisories are all in the `vercel` CLI's own dependencies.
+  It runs only on this machine and is not deployed. `npm audit --omit=dev` is the number to watch.
 - **Secret rotation:** when a secret needs replacing, the Claude Code auto-mode check blocks
   Claude from writing to Vercel env ("Secret-Store Writes"). Claude generates the value into a
   file in the owner's home folder (not the OneDrive-synced Desktop), and the owner runs these
@@ -207,6 +264,42 @@ Standing notes for future work, not defects:
 ---
 
 ## Change log
+
+### 2026-11-01: second full review
+
+- **Dependencies:** Next 16.3.6 → 16.4.3 (critical advisory, including unauthenticated RCE), React
+  19.3.1, nodemailer 10, imapflow 2, mailparser 3.14, Tailwind 3 → 4 (CSS-first; `tailwind.config.ts`
+  and autoprefixer removed), Vercel CLI 65. `npm audit --omit=dev` went from 6 advisories to 0.
+- **Security:** nonce CSP without `unsafe-inline` or `unsafe-eval`; `img-src` narrowed; login compares
+  email and password every time (`&&` skipped the second); public auth errors no longer reveal the
+  owner's address or configuration; a daily cap on login codes; a key allowlist on `/api/state`;
+  read-only IMAP; a validated Message-ID before it reaches a mail header.
+- **Sync data loss fixed:** the `pull()` race (reproduced: with the old order the edit was
+  overwritten and never reached the server), and tombstones that refused deliberate re-adds, which
+  broke "Clear list" followed by a new search.
+- **AI:** retired models and truncated JSON fall through the chain; a stream that failed before its
+  first token now does too; streams have a gap timeout rather than a total one; an upstream
+  disconnect is no longer reported as a finished stream, which could have been saved as a resume.
+- **Reach:** secondary office locations are matched; JSearch's 15s timeout, which was silently
+  losing most phrasings, is now 28s; title hints are whole words ("vue" matched "Revenue"); skills
+  match however a posting writes them ("Node.js (basics)" never matched before).
+- **Rules that had slipped:** Apply Kits now refuses AI-researched leads, as Auto-Pilot always did.
+  Auto-Pilot's tailored resume goes through `claimCheck`. Applied jobs are not offered again.
+- **New:** the Today dashboard, `/profile` (moved out of Evolve, with backup download and "remove
+  from this browser"), threaded email replies, job list filter, sort and posting age, PWA manifest,
+  per-page titles, return to the requested page after login, source warnings on job search.
+- **Fixed in passing:** follow-up reminders that could never clear; duplicate input ids on Tailor;
+  the empty read-only email box on Login; Referrals showing only the first twelve jobs, unsorted;
+  a YC job vanishing from its filter after a plain board search; the job list growing until
+  localStorage filled; the inbox page claiming mail stayed in the browser; "rate" in a mail error
+  matching "generate"; raw NUL bytes in `lib/aiCache.ts` (cache keys unchanged); `.env.local.example`
+  being gitignored; the README's Anthropic and default-password instructions.
+- **Design:** grouped navigation with one icon set, higher-contrast secondary text, defined `ink-500`
+  and `neon-300` (used but missing, so those classes did nothing), `bg-neon-500/12` now compiles,
+  visible keyboard focus, reduced-motion support, shared alert and chip classes.
+- **Verified:** `check.mjs` including the build; 50 browser checks in headless Chromium with no
+  console errors or CSP violations; 19 end-to-end checks through the real routes against a fake
+  Upstash, with real Gemini calls and a live board search (100 listings, all with descriptions).
 
 ### 2026-09-26: secrets rotated
 

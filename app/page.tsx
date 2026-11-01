@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { store, defaultStats } from "@/lib/store";
+import { buildToday, type TodayItem } from "@/lib/today";
 import { quota, type QuotaInfo } from "@/lib/quota";
 import {
   breakdown,
@@ -14,6 +15,13 @@ import {
   type BreakdownRow,
 } from "@/lib/outcomes";
 import type { ResumeData, ValidationResult, UsageStats, Strategy } from "@/lib/types";
+
+const TONE: Record<TodayItem["tone"], string> = {
+  red: "bg-coral-500/15 text-coral-400",
+  amber: "bg-amberx-500/15 text-amberx-400",
+  blue: "bg-sky2-500/15 text-sky2-400",
+  green: "bg-neon-500/15 text-neon-400",
+};
 
 export default function Dashboard() {
   const [resume, setResume] = useState<ResumeData | null>(null);
@@ -29,6 +37,7 @@ export default function Dashboard() {
   const [byScore, setByScore] = useState<BreakdownRow[]>([]);
   const [byResume, setByResume] = useState<BreakdownRow[]>([]);
   const [daysToReply, setDaysToReply] = useState<number | null>(null);
+  const [today, setToday] = useState<TodayItem[]>([]);
   const [funnel, setFunnel] = useState({
     applied: 0,
     replied: 0,
@@ -43,9 +52,19 @@ export default function Dashboard() {
   useEffect(() => {
     setResume(store.getResume());
     setValidation(store.getValidation());
+    setToday(
+      buildToday({
+        inbox: store.getInbox(),
+        emails: store.getEmails(),
+        queue: store.getQueue(),
+        apps: store.getApps(),
+        referrals: store.getReferrals(),
+        jobs: store.getJobs(),
+      })
+    );
     setStats(store.getStats());
     setStrategy(store.getStrategy());
-    setAppsCount(store.getApps().length);
+    setAppsCount(store.getApps().length + store.getQueue().length);
     setJobsCount(store.getJobs().length);
     setQuotas(quota.all());
 
@@ -71,83 +90,84 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="h1">Welcome back{name ? `, ${name}` : ""} 👋</h1>
+        <h1 className="h1">{name ? `Good to see you, ${name}` : "Today"}</h1>
         <p className="muted mt-1">
-          Your AI career copilot — resume, matching, applications, and interview prep in
-          one place.
+          {today.length
+            ? "What moves your job search forward today, most urgent first."
+            : "Nothing is waiting on you right now."}
         </p>
       </div>
 
-      {/* Stat cards */}
+      {/* What to do next. Totals say how much has happened; this says what to do. */}
+      {today.length > 0 && (
+        <div className="grid gap-3 md:grid-cols-2">
+          {today.map((item) => (
+            <Link
+              key={item.key}
+              href={item.href}
+              className="card p-4 flex items-start gap-3.5 transition hover:border-ink-600 group"
+            >
+              <span
+                className={`mt-0.5 grid place-items-center w-9 h-9 shrink-0 rounded-lg font-display font-bold text-sm ${TONE[item.tone]}`}
+              >
+                {item.count}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-ink-100 group-hover:text-neon-400 transition">
+                  {item.title}
+                </span>
+                <span className="block text-xs text-ink-400 mt-0.5 truncate">{item.detail}</span>
+              </span>
+              <span className="text-ink-500 group-hover:text-neon-400 transition" aria-hidden="true">→</span>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {/* Setup, shown only until it is done. */}
+      {steps.some((s) => !s.done) && (
+        <div className="card-pad">
+          <h2 className="h2 mb-3">Get set up</h2>
+          <div className="space-y-1">
+            {steps.filter((s) => !s.done).map((s) => (
+              <Link
+                key={s.label}
+                href={s.href}
+                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-ink-100 hover:bg-ink-800 transition group"
+              >
+                <span className="w-5 h-5 rounded-full border border-ink-600" aria-hidden="true" />
+                {s.label}
+                <span className="ml-auto text-ink-400 group-hover:text-neon-400" aria-hidden="true">→</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Resume score"
           value={validation ? `${validation.overallScore}/100` : "—"}
-          sub={validation ? validation.verdict : "Not validated yet"}
+          sub={
+            !validation
+              ? "Not validated yet"
+              : resume && resume.updatedAt > validation.at
+              ? "Resume changed since"
+              : "From your last validation"
+          }
           accent={validation && validation.overallScore >= 75 ? "green" : "amber"}
         />
+        <StatCard label="Job matches" value={String(jobsCount)} sub="saved to apply to" accent="blue" />
+        <StatCard label="Applications" value={String(appsCount)} sub="prepared so far" accent="green" />
         <StatCard
-          label="Job matches"
-          value={String(jobsCount)}
-          sub="on Job Matches page"
-          accent="blue"
+          label="Reply rate"
+          value={funnel.applied ? `${funnel.replyRate.toFixed(0)}%` : "—"}
+          sub={funnel.applied ? `of ${funnel.applied} sent` : "Nothing sent yet"}
+          accent={funnel.replyRate >= 10 ? "green" : "amber"}
         />
-        <StatCard
-          label="Applications prepared"
-          value={String(appsCount)}
-          sub="ready in Auto-Apply"
-          accent="green"
-        />
-        <StatCard
-          label="AI strategy"
-          value={`v${strategy?.version ?? 1}`}
-          sub="evolve to improve"
-          accent="amber"
-        />
-      </div>
-
-      {/* Getting started checklist */}
-      <div className="card-pad">
-        <h2 className="h2 mb-4">Your pipeline</h2>
-        <div className="space-y-2.5">
-          {steps.map((s) => (
-            <Link
-              key={s.label}
-              href={s.href}
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-ink-800 transition group"
-            >
-              <span
-                className={`grid place-items-center w-6 h-6 rounded-full text-xs font-bold ${
-                  s.done
-                    ? "bg-neon-500/20 text-neon-400 border border-neon-500/40"
-                    : "bg-ink-800 text-ink-400 border border-ink-600"
-                }`}
-              >
-                {s.done ? "✓" : "○"}
-              </span>
-              <span className={s.done ? "text-ink-300 line-through" : "text-ink-100"}>
-                {s.label}
-              </span>
-              <span className="ml-auto text-ink-400 group-hover:text-neon-400 text-sm">
-                →
-              </span>
-            </Link>
-          ))}
-        </div>
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
-        <div className="card-pad">
-          <h2 className="h2 mb-3">Activity</h2>
-          <ul className="space-y-2 text-sm text-ink-300">
-            <li>Resume improvements: <b className="text-ink-100">{stats.improvements}</b></li>
-            <li>Validations run: <b className="text-ink-100">{stats.validations}</b></li>
-            <li>Tailored versions: <b className="text-ink-100">{stats.tailors}</b></li>
-            <li>Jobs analyzed: <b className="text-ink-100">{stats.jobsAnalyzed}</b></li>
-            <li>Mock interviews: <b className="text-ink-100">{stats.interviews}</b></li>
-            <li>Practice questions solved: <b className="text-ink-100">{stats.practiceSolved}</b></li>
-          </ul>
-        </div>
         <div className="card-pad md:col-span-2">
           <h2 className="h2 mb-1">Your funnel</h2>
           <p className="text-xs text-ink-400 mb-4">
@@ -157,9 +177,9 @@ export default function Dashboard() {
           </p>
           {funnel.applied === 0 ? (
             <p className="text-sm text-ink-400">
-              Nothing tracked yet. Mark applications as applied on the{" "}
-              <Link href="/apply?tab=kits" className="text-neon-400 underline">
-                Apply Kits
+              Nothing tracked yet. Mark applications as sent on the{" "}
+              <Link href="/apply" className="text-neon-400 underline">
+                Apply
               </Link>{" "}
               page, then record what happened.
             </p>
@@ -242,15 +262,17 @@ export default function Dashboard() {
             </p>
           </div>
         </div>
-        <div className="card-pad md:col-span-2">
-          <h2 className="h2 mb-3">Honest by design</h2>
-          <p className="text-sm text-ink-300 leading-relaxed">
-            CareerPilot maximizes your odds — sharper resume, tailored applications,
-            interview reps — but no tool can guarantee a job. Auto-Apply prepares
-            everything per job (cover letter, answers, tailored bullets) and hands you
-            one-click submission links, keeping your LinkedIn/Naukri accounts safe from
-            bot bans.
-          </p>
+        <div className="card-pad">
+          <h2 className="h2 mb-3">Activity</h2>
+          <ul className="space-y-2 text-sm text-ink-300">
+            <li>Resume improvements: <b className="text-ink-100">{stats.improvements}</b></li>
+            <li>Validations run: <b className="text-ink-100">{stats.validations}</b></li>
+            <li>Tailored versions: <b className="text-ink-100">{stats.tailors}</b></li>
+            <li>Jobs analyzed: <b className="text-ink-100">{stats.jobsAnalyzed}</b></li>
+            <li>Mock interviews: <b className="text-ink-100">{stats.interviews}</b></li>
+            <li>Practice questions solved: <b className="text-ink-100">{stats.practiceSolved}</b></li>
+            <li>AI strategy: <b className="text-ink-100">v{strategy?.version ?? 1}</b></li>
+          </ul>
         </div>
       </div>
     </div>

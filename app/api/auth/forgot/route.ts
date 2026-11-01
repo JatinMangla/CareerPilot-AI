@@ -3,43 +3,57 @@ import { OTP_COOKIE, ownerEmail } from "@/lib/auth";
 import { kvConfigured } from "@/lib/kv";
 import { sendOwnerMail } from "@/lib/mail";
 import { issueOtp, OTP_TTL_SEC } from "@/lib/otp";
-import { rateLimitPair } from "@/lib/rateLimit";
+import { rateLimit, rateLimitPair } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
 /**
+ * Most codes in a day. Each one allows five guesses, so the 15-minute limits alone
+ * still gave anyone patient 4,800 guesses a day at a 900,000-value code, about
+ * 0.5%. This caps it at 150. Reaching it locks the email route for the day, and
+ * password sign-in is the way in if someone spends it on purpose.
+ */
+const DAILY_CODE_LIMIT = 30;
+
+/**
  * Emails a 6-digit login code to the owner's email via Resend.
  * The code's hash lives in Redis (lib/otp.ts); the browser holds only a nonce.
+ *
+ * This route is public, so what it says goes to anyone. Configuration and the
+ * owner's address stay in the server log.
  */
 export async function POST(req: Request) {
-  if (!process.env.RESEND_API_KEY) {
-    return Response.json(
-      { error: "RESEND_API_KEY is not configured — cannot send the login code." },
-      { status: 500 }
+  const unavailable = () =>
+    Response.json(
+      { error: "Email codes aren't available right now. Sign in with your password instead." },
+      { status: 503 }
     );
+
+  if (!process.env.RESEND_API_KEY) {
+    console.error("[auth/forgot] RESEND_API_KEY is not set");
+    return unavailable();
   }
   let email: string;
   try {
     email = ownerEmail();
   } catch (err) {
-    return Response.json({ error: (err as Error).message }, { status: 500 });
+    console.error("[auth/forgot]", (err as Error).message);
+    return unavailable();
   }
 
   // Without Redis there is nowhere the client cannot tamper with to count
   // guesses, and a 6-digit code without an attempt limit is brute-forceable.
   if (!kvConfigured()) {
-    return Response.json(
-      {
-        error:
-          "Email-code sign-in needs the Redis database, which keeps the code where it can't be guessed. Sign in with your password, or connect Upstash Redis.",
-      },
-      { status: 503 }
-    );
+    console.error("[auth/forgot] Redis is not configured");
+    return unavailable();
   }
 
   // Unauthenticated, and every call emails the owner: per-IP so one client
   // cannot mailbomb, plus a global ceiling so many clients cannot either.
-  const limited = await rateLimitPair(req, "otp-send", 5, 10, 60 * 15, { failClosed: true });
+  let limited = await rateLimitPair(req, "otp-send", 5, 10, 60 * 15, { failClosed: true });
+  if (limited.allowed) {
+    limited = await rateLimit("otp-send-day", DAILY_CODE_LIMIT, 60 * 60 * 24, { failClosed: true });
+  }
   if (!limited.allowed) {
     return Response.json(
       {
@@ -73,14 +87,12 @@ export async function POST(req: Request) {
   );
 
   if (!sent.ok) {
+    // The likely cause on a free Resend account is 403: it only delivers to the
+    // address that registered it. Said in the log, because the old message put
+    // the owner's full email in a response anyone could trigger.
+    console.error("[auth/forgot] email failed", { status: sent.status, detail: sent.detail });
     return Response.json(
-      {
-        error: `Email sending failed (Resend ${sent.status}). ${
-          sent.status === 403
-            ? "Free Resend accounts can only send to the email you registered Resend with — make sure that's " + email + "."
-            : sent.detail
-        }`,
-      },
+      { error: "The login code couldn't be sent. Try again, or sign in with your password." },
       { status: 502 }
     );
   }

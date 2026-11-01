@@ -25,6 +25,12 @@ function isEmail(v: unknown): v is string {
   return typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 }
 
+/** Vercel refuses bodies over 4.5MB, and base64 adds a third. */
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+
+/** An RFC 5322 Message-ID. It goes into a header, so nothing else is accepted. */
+const MESSAGE_ID_RE = /^<[^<>\s]{1,500}>$/;
+
 export async function POST(req: Request) {
   const denied = await requireSession();
   if (denied) return denied;
@@ -42,7 +48,13 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { to, cc, subject, text, fromName, attachment } = body || {};
+  const { to, cc, subject, text, fromName, attachment, inReplyTo } = body || {};
+  // A reply carries the original's id, so it lands in the recruiter's existing
+  // thread instead of arriving as an unrelated new email.
+  const thread =
+    typeof inReplyTo === "string" && MESSAGE_ID_RE.test(inReplyTo)
+      ? { inReplyTo, references: inReplyTo }
+      : {};
 
   if (!isEmail(to)) {
     return Response.json({ error: "Enter a valid recipient email address." }, { status: 400 });
@@ -60,8 +72,8 @@ export async function POST(req: Request) {
   const attachments: any[] = [];
   if (attachment?.base64 && attachment?.filename) {
     const bytes = Buffer.from(attachment.base64, "base64");
-    if (bytes.length > 8 * 1024 * 1024) {
-      return Response.json({ error: "Attachment is larger than 8 MB." }, { status: 400 });
+    if (bytes.length > MAX_ATTACHMENT_BYTES) {
+      return Response.json({ error: "The attachment is over 3 MB." }, { status: 400 });
     }
     attachments.push({
       filename: String(attachment.filename),
@@ -76,6 +88,11 @@ export async function POST(req: Request) {
       port: 465,
       secure: true,
       auth: { user, pass },
+      // The defaults run past this function's limit, which then fails with no
+      // way to tell whether the mail went.
+      connectionTimeout: 15_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 40_000,
     });
 
     const info = await transporter.sendMail({
@@ -86,6 +103,7 @@ export async function POST(req: Request) {
       subject: subject.trim(),
       text: text.trim(),
       attachments,
+      ...thread,
     });
 
     return Response.json({
@@ -104,7 +122,9 @@ export async function POST(req: Request) {
         { status: 401 }
       );
     }
-    if (/limit|quota|rate/i.test(msg)) {
+    // Specific phrases: a bare /rate/ also matched "generate" and "operate", and
+    // reported unrelated failures as Gmail's daily limit.
+    if (/sending limit|daily user|quota|too many (messages|recipients|login)|\b(421|452|550)[ -]5\.4\.5/i.test(msg)) {
       return Response.json(
         { error: "Gmail's daily sending limit was hit (~500/day). Try again tomorrow." },
         { status: 429 }

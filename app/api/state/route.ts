@@ -27,6 +27,15 @@ export const maxDuration = 30;
  *                      POST rather than PUT: this deployment 405s on PUT.
  */
 
+/**
+ * Only the app's own synced keys. It is one user behind a session, but a request
+ * body is still input: `__proto__` and `constructor` are not field names, and
+ * device-only state has no business on the server.
+ */
+const SYNC_KEY_RE = /^cp_[a-z_]+$/;
+const isSyncKey = (k: string) =>
+  SYNC_KEY_RE.test(k) && !k.startsWith("cp_sync_") && k !== "cp_meta" && k !== "cp_outreach_draft";
+
 function parseEnvelope(raw: string | null): Envelope | null {
   if (!raw) return null;
   try {
@@ -54,7 +63,7 @@ export async function GET(req: Request) {
 
     const keysParam = params.get("keys");
     if (keysParam) {
-      const keys = keysParam.split(",").map((k) => k.trim()).filter(Boolean).slice(0, 64);
+      const keys = keysParam.split(",").map((k) => k.trim()).filter(isSyncKey).slice(0, 64);
       const rows = await readFieldsWithRev(keys);
       const data: Record<string, Envelope & { rev: number }> = {};
       for (const [k, { raw, rev }] of Object.entries(rows)) {
@@ -84,8 +93,8 @@ export async function DELETE(req: Request) {
     return Response.json({ error: "No database connected." }, { status: 503 });
   }
   const key = new URL(req.url).searchParams.get("key");
-  if (!key) {
-    return Response.json({ error: "A ?key= parameter is required." }, { status: 400 });
+  if (!key || !isSyncKey(key)) {
+    return Response.json({ error: "A valid ?key= parameter is required." }, { status: 400 });
   }
   try {
     const removed = await deleteField(key);
@@ -127,7 +136,7 @@ export async function POST(req: Request) {
 
   const incoming: Record<string, IncomingEntry> = body?.data || {};
   const keys = Object.keys(incoming).filter(
-    (k) => incoming[k] && typeof incoming[k].at === "number"
+    (k) => isSyncKey(k) && incoming[k] && typeof incoming[k].at === "number"
   );
   if (!keys.length) return Response.json({ ok: true, written: 0, results: {} });
 

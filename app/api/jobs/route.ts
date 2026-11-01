@@ -28,8 +28,11 @@ export const maxDuration = 60;
  * when the same role arrives from both, the copy that survives is the one that
  * applies directly on the employer's own ATS.
  *
- * Returns { available: false } only if nothing at all came back — the client
- * then falls back to AI-researched leads.
+ * Returns { available: false } only if nothing at all came back. The client says
+ * so and offers AI-researched leads as an explicit choice.
+ *
+ * `warnings` names any source that failed or is not set up. A dead API key used to
+ * look exactly like a quiet day: fewer results, and nothing to say why.
  */
 
 interface Listing {
@@ -50,8 +53,13 @@ const MAX_LIMIT = 150;
 /** Aggregator pages to walk. Each is one API call against a metered quota. */
 const AGGREGATOR_PAGES = 3;
 
-/** One aggregator request may not hold the search up longer than this. */
-const AGGREGATOR_TIMEOUT_MS = 15_000;
+/**
+ * One aggregator request may not hold the search up longer than this. It was 15s,
+ * and JSearch takes about that for its three pages, so with several phrasings in
+ * parallel most of them timed out and their jobs vanished without a word. Still
+ * inside the 60s function limit, and on a par with the boards' own deadline.
+ */
+const AGGREGATOR_TIMEOUT_MS = 28_000;
 
 /**
  * Board fetching stops starting new requests this long into the search, leaving
@@ -93,10 +101,44 @@ function clean(
   );
 }
 
-async function fromJSearch(queries: string[], loc: string): Promise<Listing[]> {
+/**
+ * Counts one source's requests, and says why if any failed. One phrasing of four
+ * timing out is not the same news as the key having expired, so the wording
+ * follows how much was lost. `status` 0 means no answer at all.
+ */
+function failureLog(name: string, total: number, warn: (m: string) => void) {
+  let failed = 0;
+  let last = 0;
+  return {
+    fail(status: number) {
+      failed++;
+      last = status;
+    },
+    report() {
+      if (!failed) return;
+      if (last === 401 || last === 403) {
+        warn(`${name} refused the API key, so its jobs are missing. Check the key in your Vercel settings.`);
+      } else if (last === 429) {
+        warn(`${name} is out of free searches for now, so its jobs are missing or partial.`);
+      } else {
+        warn(
+          failed >= total
+            ? `${name} didn't answer, so its jobs are missing from this search.`
+            : `${name} answered ${total - failed} of ${total} searches, so its results are partial.`
+        );
+      }
+    },
+  };
+}
+
+async function fromJSearch(queries: string[], loc: string, warn: (m: string) => void): Promise<Listing[]> {
   const key = process.env.OPENWEBNINJA_API_KEY;
-  if (!key) return [];
+  if (!key) {
+    warn("Google for Jobs isn't set up (no OPENWEBNINJA_API_KEY), so this search skipped it.");
+    return [];
+  }
   const out: Listing[] = [];
+  const failures = failureLog("Google for Jobs", queries.length, warn);
 
   // One request per query variant, each asking for several pages of results.
   // "react developer" and "frontend engineer" return substantially different
@@ -115,7 +157,7 @@ async function fromJSearch(queries: string[], loc: string): Promise<Listing[]> {
           cache: "no-store",
           signal: AbortSignal.timeout(AGGREGATOR_TIMEOUT_MS),
         });
-        if (!res.ok) return;
+        if (!res.ok) return failures.fail(res.status);
         const data = await res.json();
         for (const j of (data?.data?.jobs || data?.data || []) as any[]) {
           // job_country is the only field this API fills in reliably for a
@@ -141,18 +183,24 @@ async function fromJSearch(queries: string[], loc: string): Promise<Listing[]> {
           });
         }
       } catch {
-        /* one variant failing must not lose the others */
+        // One variant failing must not lose the others.
+        failures.fail(0);
       }
     })
   );
+  failures.report();
   return out;
 }
 
-async function fromAdzuna(queries: string[], loc: string): Promise<Listing[]> {
+async function fromAdzuna(queries: string[], loc: string, warn: (m: string) => void): Promise<Listing[]> {
   const appId = process.env.ADZUNA_APP_ID;
   const appKey = process.env.ADZUNA_APP_KEY;
-  if (!appId || !appKey) return [];
+  if (!appId || !appKey) {
+    warn("Adzuna isn't set up (no ADZUNA_APP_ID / ADZUNA_APP_KEY), so this search skipped it.");
+    return [];
+  }
   const out: Listing[] = [];
+  const failures = failureLog("Adzuna", queries.length * AGGREGATOR_PAGES, warn);
 
   const pages = Array.from({ length: AGGREGATOR_PAGES }, (_, i) => i + 1);
   await Promise.all(
@@ -171,7 +219,7 @@ async function fromAdzuna(queries: string[], loc: string): Promise<Listing[]> {
             `https://api.adzuna.com/v1/api/jobs/in/search/${page}?${params.toString()}`,
             { cache: "no-store", signal: AbortSignal.timeout(AGGREGATOR_TIMEOUT_MS) }
           );
-          if (!res.ok) return;
+          if (!res.ok) return failures.fail(res.status);
           const data = await res.json();
           for (const r of (data.results || []) as any[]) {
             out.push({
@@ -192,11 +240,12 @@ async function fromAdzuna(queries: string[], loc: string): Promise<Listing[]> {
             });
           }
         } catch {
-          /* skip this page */
+          failures.fail(0);
         }
       })
     )
   );
+  failures.report();
   return out;
 }
 
@@ -222,6 +271,10 @@ export async function POST(req: Request) {
   const wantsBoards = focus === "boards" || focus === "yc" || focus === "all";
   const wantsAggregators = focus === "portals" || focus === "all";
 
+  // A set, because every failed query variant reports the same thing.
+  const warnings = new Set<string>();
+  const warn = (m: string) => void warnings.add(m);
+
   const [boards, jsearch, adzuna] = await Promise.all([
     wantsBoards
       ? searchCompanyBoards({
@@ -237,11 +290,10 @@ export async function POST(req: Request) {
           limit: focus === "all" ? Math.ceil(limit * 0.6) : limit,
         }).catch(() => [])
       : Promise.resolve([]),
-    wantsAggregators ? fromJSearch(queries, loc).catch(() => []) : Promise.resolve([]),
-    wantsAggregators ? fromAdzuna(queries, loc).catch(() => []) : Promise.resolve([]),
+    wantsAggregators ? fromJSearch(queries, loc, warn).catch(() => []) : Promise.resolve([]),
+    wantsAggregators ? fromAdzuna(queries, loc, warn).catch(() => []) : Promise.resolve([]),
   ]);
 
-  const boardSource = focus === "yc" ? "yc-boards" : "company-boards";
   const boardListings: Listing[] = boards.map((j) => ({
     id: j.id,
     title: j.title,
@@ -254,7 +306,10 @@ export async function POST(req: Request) {
     description: [j.department ? `Team: ${j.department}` : "", j.description || ""]
       .filter(Boolean)
       .join("\n"),
-    source: boardSource,
+    // From the company, not from which filter ran. Labelled by filter, a YC job
+    // re-found by a plain "Company boards" search was relabelled and vanished
+    // from the Y Combinator filter it had been found under.
+    source: j.yc ? "yc-boards" : "company-boards",
     postedAt: j.postedAt,
   }));
 
@@ -266,7 +321,9 @@ export async function POST(req: Request) {
     ...clean(adzuna, loc, true),
   ]).slice(0, limit);
 
-  if (!merged.length) return Response.json({ available: false, listings: [] });
+  if (!merged.length) {
+    return Response.json({ available: false, listings: [], warnings: Array.from(warnings) });
+  }
 
   const counts: Record<string, number> = {};
   for (const l of merged) counts[l.source] = (counts[l.source] || 0) + 1;
@@ -277,5 +334,6 @@ export async function POST(req: Request) {
     source: Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0],
     counts,
     listings: merged,
+    warnings: Array.from(warnings),
   });
 }

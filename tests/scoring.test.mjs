@@ -47,6 +47,40 @@ test("title matching: generic words no longer admit unrelated roles", () => {
   assert.equal(matchesRole("Engineering Manager, Frontend", [], 12), false);
 });
 
+test("title hints are whole words", () => {
+  assert.equal(matchesRole("Revenue Analyst", [], 4), false);
+  assert.equal(matchesRole("Reactor Operator", [], 4), false);
+  assert.equal(matchesRole("React.js Developer", [], 4), true);
+  assert.equal(matchesRole("Vue.js Engineer", [], 4), true);
+  assert.equal(matchesRole("AngularJS Developer", [], 4), true);
+  assert.equal(matchesRole("Front-End Engineer", [], 4), true);
+});
+
+test("a chip design engineer is not a design engineer", () => {
+  assert.equal(matchesRole("Analog Design Engineer", [], 4), false);
+  assert.equal(matchesRole("Design Engineer", [], 4), true);
+});
+
+test("a profile's skill matches however a posting writes it", () => {
+  const p = { skills: ["Node.js (basics)", "Tailwind CSS", "Next.js"], yearsExperience: 3 };
+  const s = quickScore({ title: "Engineer", description: "Node, Tailwind and NextJS in production." }, p);
+  assert.match(s.pros.join(), /Node\.js \(basics\)/);
+  assert.match(s.pros.join(), /Tailwind CSS/);
+  assert.match(s.pros.join(), /Next\.js/);
+});
+
+test("the word next does not count as Next.js", () => {
+  const s = quickScore({ title: "Engineer", description: "Join the next generation of builders." }, { skills: ["Next.js"], yearsExperience: 3 });
+  assert.ok(!s.pros.some((x) => /Next\.js/.test(x)));
+});
+
+test("a role phrase matches a hyphenated title and a short one", () => {
+  const front = quickScore({ title: "Front-End Engineer", description: "x" }, { skills: [], desiredRoles: "Frontend Developer" });
+  assert.ok(front.pros.some((x) => /targeting/.test(x)));
+  const ui = quickScore({ title: "Senior UI Engineer", description: "x" }, { skills: [], desiredRoles: "UI Engineer" });
+  assert.ok(ui.pros.some((x) => /targeting/.test(x)));
+});
+
 test("Greenhouse's escaped HTML becomes text", () => {
   assert.equal(htmlToText("&lt;p&gt;Hello &amp;amp; welcome&lt;/p&gt;&lt;ul&gt;&lt;li&gt;React&lt;/li&gt;&lt;/ul&gt;").includes("- React"), true);
   const long = "About us. ".repeat(300) + "Requirements: 3+ years of React.";

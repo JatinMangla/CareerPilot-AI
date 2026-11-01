@@ -31,10 +31,31 @@ interface ListingLike {
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** Frameworks a posting names with or without the ".js". Not "next": it's an English word. */
+const BARE_NAMES = new Set(["node", "vue", "react", "express", "angular"]);
+
+/**
+ * The ways a posting may write a skill. Profiles say "Node.js (basics)" and
+ * "Tailwind CSS"; postings say "Node" and "Tailwind", so the literal string
+ * never matched and the skill counted for nothing.
+ */
+function skillTerms(skill: string): string[] {
+  const base = skill.replace(/\(.*?\)/g, "").trim().toLowerCase();
+  if (!base) return [];
+  const out = [base];
+  if (base.endsWith(".js")) {
+    const bare = base.slice(0, -3);
+    out.push(`${bare}js`);
+    if (BARE_NAMES.has(bare)) out.push(bare);
+  }
+  if (base.endsWith(" css")) out.push(base.slice(0, -4));
+  return out;
+}
+
 /** Matches a skill as a whole term: "Go" must not match "Google", "C" not "CSS". */
 function skillRe(skill: string): RegExp {
-  const s = escapeRe(skill.trim().toLowerCase());
-  return new RegExp(`(^|[^a-z0-9+#])${s}($|[^a-z0-9+#])`, "i");
+  const terms = skillTerms(skill).map(escapeRe).join("|");
+  return new RegExp(`(^|[^a-z0-9+#])(${terms || "$^"})($|[^a-z0-9+#])`, "i");
 }
 
 /** Skills that are table stakes for almost any web role, so they prove little. */
@@ -55,7 +76,8 @@ export function requiredYears(text: string): number | null {
 }
 
 export function quickScore(listing: ListingLike, profile: Partial<Profile>): QuickScore {
-  const title = (listing.title || "").toLowerCase();
+  // "Front-End" and "Front End" are the same word as the profile's "Frontend".
+  const title = (listing.title || "").toLowerCase().replace(/front[\s-]end/g, "frontend");
   const desc = listing.description || "";
   const text = `${listing.title} ${desc}`;
   const pros: string[] = [];
@@ -78,11 +100,13 @@ export function quickScore(listing: ListingLike, profile: Partial<Profile>): Qui
   }
 
   // Desired role words in the title.
-  const roleWords = (profile.desiredRoles || profile.role || "")
-    .toLowerCase()
+  const wanted = (profile.desiredRoles || profile.role || "").toLowerCase().replace(/front[\s-]end/g, "frontend");
+  const rolePhrases = wanted.split(/[,/|]/).map((p) => p.trim()).filter(Boolean);
+  const roleWords = wanted
     .split(/[^a-z.]+/)
     .filter((w) => w.length > 3 && !["developer", "engineer", "senior", "junior"].includes(w));
-  if (roleWords.some((w) => title.includes(w))) {
+  // Whole phrases too: "UI Engineer" has no single word long enough to count.
+  if (rolePhrases.some((p) => title.includes(p)) || roleWords.some((w) => title.includes(w))) {
     score += 12;
     pros.push("Title matches the roles you are targeting");
   }

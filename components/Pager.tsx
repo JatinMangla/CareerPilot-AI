@@ -82,8 +82,8 @@ export function Pager({
               aria-current={p === page ? "page" : undefined}
               className={`min-w-[2rem] rounded-lg px-2 py-1.5 font-semibold border transition ${
                 p === page
-                  ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
-                  : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                  ? "chip-on"
+                  : "chip-off"
               }`}
             >
               {p}

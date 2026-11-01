@@ -29,6 +29,8 @@ const MODULES = [
   "lib/inboxFilters.ts",
   "lib/companyBoards.ts",
   "lib/safeUrl.ts",
+  "lib/gemini.ts",
+  "lib/today.ts",
 ];
 
 export function runTests() {

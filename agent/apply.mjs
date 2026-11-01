@@ -536,7 +536,7 @@ async function main() {
     if (isBlocked(app.url)) {
       report.status = "skipped_portal";
       report.note = "Job portal — automated submission violates their terms. Submit manually.";
-      log(c.amber(`      ⏭  Skipped: portal site (submit manually from Auto-Apply)`));
+      log(c.amber(`      ⏭  Skipped: portal site (submit manually from Apply Kits)`));
       results.push(report);
       continue;
     }

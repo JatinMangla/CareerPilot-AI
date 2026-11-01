@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 
 type Mode = "otp-send" | "otp-verify" | "password";
 
+/** Where the proxy said you were headed. A path on this site, or the dashboard. */
+function nextPath(): string {
+  const next = new URLSearchParams(window.location.search).get("next") || "/";
+  return /^\/(?![/\\])/.test(next) ? next : "/";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("otp-send");
@@ -60,7 +66,7 @@ export default function LoginPage() {
         setError(data.error || "Invalid code");
         return;
       }
-      router.push("/");
+      router.push(nextPath());
       router.refresh();
     } catch {
       setError("Couldn't reach the server — check your connection and try again.");
@@ -84,7 +90,7 @@ export default function LoginPage() {
         setError(data.error || "Login failed");
         return;
       }
-      router.push("/");
+      router.push(nextPath());
       router.refresh();
     } catch {
       setError("Couldn't reach the server — check your connection and try again.");
@@ -111,10 +117,6 @@ export default function LoginPage() {
         <div className="card-pad space-y-4">
           {mode === "otp-send" && (
             <>
-              <div>
-                <label className="label" htmlFor="login-your-email">Your email</label>
-                <input id="login-your-email" className="input" type="email" value={email} readOnly />
-              </div>
               <button className="btn-primary w-full" onClick={sendCode} disabled={loading}>
                 {loading ? "Sending…" : "✉ Email me a login code"}
               </button>
@@ -132,6 +134,7 @@ export default function LoginPage() {
                 <input id="login-enter-the-6-digit-code-sent-to"
                   className="input text-center text-2xl tracking-[0.5em] font-mono"
                   inputMode="numeric"
+                  autoComplete="one-time-code"
                   pattern="[0-9]{6}"
                   maxLength={6}
                   value={code}

@@ -8,10 +8,11 @@ import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { detectAts, isVerifiedSource } from "@/lib/ats";
 import { openTabs, blockedHint, TAB_BATCH } from "@/lib/openTabs";
 import { safeHref } from "@/lib/safeUrl";
-import { isBlockedListing } from "@/lib/jobFilters";
+import { fingerprint, isBlockedListing } from "@/lib/jobFilters";
 import { Pager, usePaged } from "@/components/Pager";
 import { OUTCOME_STAGES, type AutoTailorPlan, type Job, type OutcomeStage, type QueuedApplication } from "@/lib/types";
-import { applicationStamp } from "@/lib/outcomes";
+import { appliedJobs, applicationStamp } from "@/lib/outcomes";
+import { describeClaims, newClaims } from "@/lib/claimCheck";
 import { useCancellable } from "@/lib/useCancellable";
 import RunProgress from "@/components/RunProgress";
 
@@ -132,6 +133,10 @@ export default function AutoPilot() {
           autoSubmit: ats.autoSubmit,
           approvedClaimIds: [],
           at: Date.now(),
+          // Recorded now: by the time it is sent the job may have left the list,
+          // and the channel and score with it.
+          source: job.source,
+          matchScore: job.matchScore,
         };
 
         if (plan) {
@@ -141,6 +146,7 @@ export default function AutoPilot() {
             status: needsApproval ? "needs_approval" : "approved",
             plan,
             finalResume: plan.tailoredResume,
+            claimNote: describeClaims(newClaims(resume.text, plan.tailoredResume)),
           });
         } else {
           added.push({
@@ -167,6 +173,7 @@ export default function AutoPilot() {
     setError("");
     setBusy(true);
     setProgress(`Finalizing resume for ${item.company}…`);
+    const signal = run.start();
     try {
       const approvedClaims = (item.plan?.newClaims || []).filter((c) =>
         approvedIds.includes(c.id)
@@ -181,7 +188,8 @@ export default function AutoPilot() {
             answers,
             profile: store.getProfile(),
           },
-          () => {}
+          () => {},
+          { signal }
         );
       }
       updateQueue((all) => all.map((q) =>
@@ -195,7 +203,7 @@ export default function AutoPilot() {
           : q
       ));
     } catch (err: any) {
-      setError(err.message);
+      if (err.name !== "AbortError") setError(err.message);
     } finally {
       setBusy(false);
       setProgress("");
@@ -350,8 +358,16 @@ export default function AutoPilot() {
     }
   }
 
+  // Applied through Apply Kits counts too, by company and title rather than id: it
+  // kept offering jobs already sent, which is how the same application goes twice.
+  const applied = appliedJobs();
   const unqueued = jobs
-    .filter((j) => !queue.some((q) => q.jobId === j.id) && !isBlockedListing(j.url, j.company))
+    .filter(
+      (j) =>
+        !queue.some((q) => q.jobId === j.id) &&
+        !isBlockedListing(j.url, j.company) &&
+        !applied.has(fingerprint(j))
+    )
     .sort((a, b) => b.matchScore - a.matchScore);
   // Rendering is paged; selection and "queue top N" still span the whole list.
   const unqueuedPage = usePaged(unqueued, PAGE_SIZE, null);
@@ -415,7 +431,7 @@ export default function AutoPilot() {
         ))}
       </div>
 
-      <div className="text-xs text-ink-300 bg-sky2-500/10 border border-sky2-500/25 rounded-xl px-4 py-3 leading-relaxed">
+      <div className="alert-info">
         <b className="text-sky2-400">You press Submit — always.</b> Auto-Pilot does every
         step except the last one: it tailors the resume, writes the cover letter, answers
         the screening questions, then opens each application in its own tab with the kit
@@ -430,7 +446,7 @@ export default function AutoPilot() {
       </div>
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}
@@ -678,6 +694,12 @@ function QueueCard({
 
       {item.error && <p className="text-xs text-coral-400 mt-2">{item.error}</p>}
       {item.plan && <p className="text-xs text-ink-300 mt-2 leading-relaxed">{item.plan.summary}</p>}
+      {item.claimNote && item.status !== "submitted" && (
+        <p className="alert-warn mt-2 py-2">
+          Not in your resume: {item.claimNote}. Check each is true in the preview below before
+          sending this version.
+        </p>
+      )}
 
       <div className="flex gap-3 mt-3 flex-wrap">
         <button className="text-xs text-neon-400 hover:underline" onClick={() => setOpen(!open)}>

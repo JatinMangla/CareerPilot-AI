@@ -145,6 +145,18 @@ export function matchesLocation(location: string | undefined, wanted: string): b
   return INDIA_RE.test(want) ? openRemote() : REMOTE_RE.test(l);
 }
 
+/**
+ * The first of a posting's locations that `wanted` can reach, or null.
+ *
+ * A role open in several offices lists one as primary. Lever and Ashby send the
+ * rest separately, and matching the primary alone dropped every role based in
+ * San Francisco that is also open in Bengaluru.
+ */
+export function reachableLocation(locations: (string | undefined)[], wanted: string): string | null {
+  for (const l of locations) if (l && matchesLocation(l, wanted)) return l;
+  return null;
+}
+
 /** ISO country code for the aggregators that want one. */
 export function countryCode(wanted: string): string {
   return INDIA_RE.test(wanted || "") ? "in" : "";
@@ -217,6 +229,43 @@ export function sourceRank(source: string | undefined): number {
   if (source === "company-boards" || source === "yc-boards") return 3;
   if (source === "jsearch" || source === "adzuna") return 2;
   return 1;
+}
+
+/** Saved matches kept on a device. At about 2.5KB each, roughly 1.5MB of 5MB. */
+export const MAX_SAVED_JOBS = 600;
+/** A listing nobody acted on stops being worth keeping after this long. */
+const STALE_JOB_MS = 45 * 24 * 60 * 60 * 1000;
+
+/**
+ * Bounds the saved job list without losing anything that matters.
+ *
+ * Anything in `inUse` — queued, prepared, or with a referral plan — is never
+ * dropped, because those cards refer back to the job. After that the list loses
+ * stale listings the AI never looked at, then, past the cap, whatever is least
+ * valuable: quick-scored before AI-analysed, then lowest score, then oldest. A
+ * pruned listing simply comes back if a later search finds it; this is not a
+ * dismissal.
+ */
+export function pruneJobs<
+  T extends { id: string; aiScored?: boolean; matchScore: number; foundAt?: number }
+>(jobs: T[], inUse: Set<string>, now: number, cap = MAX_SAVED_JOBS): T[] {
+  const fresh = jobs.filter(
+    (j) =>
+      inUse.has(j.id) ||
+      j.aiScored !== false ||
+      now - (j.foundAt ?? now) < STALE_JOB_MS
+  );
+  if (fresh.length <= cap) return fresh;
+
+  const worthKeeping = (j: T) => [j.aiScored === false ? 0 : 1, j.matchScore, j.foundAt ?? 0];
+  const spare = fresh
+    .filter((j) => !inUse.has(j.id))
+    .sort((a, b) => {
+      const [x, y] = [worthKeeping(a), worthKeeping(b)];
+      return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+    });
+  const drop = new Set(spare.slice(0, fresh.length - cap).map((j) => j.id));
+  return fresh.filter((j) => !drop.has(j.id));
 }
 
 /**

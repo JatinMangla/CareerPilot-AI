@@ -5,10 +5,11 @@ import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
-import { isBlockedListing } from "@/lib/jobFilters";
+import { isVerifiedSource } from "@/lib/ats";
+import { fingerprint, isBlockedListing } from "@/lib/jobFilters";
 import { openTabs, blockedHint, TAB_BATCH } from "@/lib/openTabs";
 import { safeHref } from "@/lib/safeUrl";
-import { applicationStamp } from "@/lib/outcomes";
+import { appliedJobs, applicationStamp } from "@/lib/outcomes";
 import { copyText } from "@/lib/clipboard";
 import { useCancellable } from "@/lib/useCancellable";
 import RunProgress from "@/components/RunProgress";
@@ -27,7 +28,7 @@ const ALL_PORTALS = [
   "Cutshort",
 ];
 
-function portalSearchUrl(portal: string, job: Job): string {
+function portalSearchUrl(portal: string, job: Pick<Job, "title" | "company" | "url">): string {
   const q = encodeURIComponent(`${job.title} ${job.company}`);
   switch (portal) {
     case "Y Combinator":
@@ -93,6 +94,17 @@ export default function ApplyKits() {
     const picked = jobs.filter((j) => selected[j.id] && !apps.some((a) => a.jobId === j.id));
     if (picked.length === 0) return setError("Select at least one job (not already prepared).");
 
+    // The same gate as Auto-Pilot. This tab predates the rule and never had it, so
+    // a guessed listing could be given a cover letter and opened as an application.
+    const unverified = picked.filter((j) => !isVerifiedSource(j.source));
+    if (unverified.length) {
+      return setError(
+        `${unverified.length} of these are AI-researched leads, not verified listings ` +
+          `(${unverified.slice(0, 3).map((j) => j.company).join(", ")}${unverified.length > 3 ? "…" : ""}). ` +
+          `The role and link may not exist, so no kit is prepared for them. Find the real posting first.`
+      );
+    }
+
     const MAX_PER_RUN = 25;
     let targets = picked;
     if (picked.length > MAX_PER_RUN) {
@@ -141,6 +153,10 @@ export default function ApplyKits() {
           tailoredHighlights: prep.tailoredHighlights,
           screeningAnswers: prep.screeningAnswers,
           at: Date.now(),
+          // Recorded now: by the time it is sent the job may have left the list,
+          // and the channel and score with it.
+          source: job.source,
+          matchScore: job.matchScore,
         });
       }
       if (added.length) store.bumpStat("applicationsPrepared", added.length);
@@ -214,7 +230,14 @@ export default function ApplyKits() {
     // Never-opened first, then least recently opened. Without the stamp every
     // click reopened the same first ten and the rest were unreachable.
     const pending = apps
-      .filter((a) => a.status !== "applied" && a.url && !isBlockedListing(a.url, a.company))
+      .filter(
+        (a) =>
+          a.status !== "applied" &&
+          a.url &&
+          !isBlockedListing(a.url, a.company) &&
+          // Kits from before the gate have no source and stay openable.
+          (!a.source || isVerifiedSource(a.source))
+      )
       .sort((a, b) => (a.openedAt ?? 0) - (b.openedAt ?? 0));
     if (!pending.length) return setError("Nothing left to open — everything is marked applied.");
     const batch = pending.slice(0, TAB_BATCH);
@@ -227,8 +250,15 @@ export default function ApplyKits() {
     }
   }
 
+  // Sent through Auto-Pilot counts too, by company and title rather than id.
+  const applied = appliedJobs();
   const unprepared = jobs
-    .filter((j) => !apps.some((a) => a.jobId === j.id) && !isBlockedListing(j.url, j.company))
+    .filter(
+      (j) =>
+        !apps.some((a) => a.jobId === j.id) &&
+        !isBlockedListing(j.url, j.company) &&
+        !applied.has(fingerprint(j))
+    )
     .sort((a, b) => b.matchScore - a.matchScore);
   const selectedCount = unprepared.filter((j) => selected[j.id]).length;
 
@@ -240,7 +270,8 @@ export default function ApplyKits() {
 
   /** Tick the n best matches at once — this list can be a hundred jobs long. */
   function selectTop(n: number) {
-    setSelected(Object.fromEntries(unprepared.slice(0, n).map((j) => [j.id, true])));
+    const picks = unprepared.filter((j) => isVerifiedSource(j.source)).slice(0, n);
+    setSelected(Object.fromEntries(picks.map((j) => [j.id, true])));
   }
 
   return (
@@ -249,11 +280,11 @@ export default function ApplyKits() {
         <h2 className="h2">Apply Kits</h2>
         <p className="muted mt-1">
           The AI prepares each application end-to-end — tailored cover letter, resume
-          bullets, screening answers — then hands you one-click submission links.
+          bullets, screening answers — then gives you the link to submit it yourself.
         </p>
       </div>
 
-      <div className="text-xs text-ink-300 bg-sky2-500/10 border border-sky2-500/25 rounded-xl px-4 py-3 leading-relaxed">
+      <div className="alert-info">
         <b className="text-sky2-400">Why not fully automatic?</b> Bot-submitting on
         LinkedIn/Naukri violates their terms and gets accounts banned. This pipeline does
         100% of the work except the final click — your accounts stay safe and every
@@ -272,8 +303,8 @@ export default function ApplyKits() {
                 onClick={() => togglePortal(p)}
                 className={`rounded-full px-4 py-1.5 text-xs font-semibold border transition ${
                   on
-                    ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
-                    : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                    ? "chip-on"
+                    : "chip-off"
                 }`}
               >
                 {on ? "✓ " : ""}
@@ -288,7 +319,7 @@ export default function ApplyKits() {
       </div>
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}
@@ -348,6 +379,11 @@ export default function ApplyKits() {
             <span className="text-sm text-ink-100">{job.title}</span>
             <span className="text-xs text-ink-400">@ {job.company}</span>
             <span className="ml-auto flex items-center gap-2">
+              {!isVerifiedSource(job.source) && (
+                <span className="badge-red" title="AI-researched lead: the role and link may not exist, so no kit is prepared for it">
+                  ⚠ unverified
+                </span>
+              )}
               <span className="badge-green">{job.aiScored === false ? `~${job.matchScore}` : `${job.matchScore}%`}</span>
               <button
                 className="text-[11px] text-coral-400 hover:underline"
@@ -389,7 +425,6 @@ export default function ApplyKits() {
               key={app.jobId}
               app={app}
               portals={profile?.portals || []}
-              job={jobs.find((j) => j.id === app.jobId)}
               onApplied={() => markApplied(app.jobId)}
               onOutcome={(o) => setOutcome(app.jobId, o)}
               onRemove={(hideJob) => removeApp(app.jobId, hideJob)}
@@ -411,20 +446,34 @@ export default function ApplyKits() {
 function AppCard({
   app,
   portals,
-  job,
   onApplied,
   onOutcome,
   onRemove,
 }: {
   app: PreparedApplication;
   portals: string[];
-  job?: Job;
   onApplied: () => void;
   onOutcome: (o: OutcomeStage) => void;
   onRemove: (hideJob: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState("");
+  // Built from the kit, which keeps working after the job has left the match list.
+  const job = { title: app.jobTitle, company: app.company, url: app.url };
+
+  async function downloadLetter() {
+    try {
+      const { buildLetterPdf, downloadBlob } = await import("@/lib/pdf/resumeDoc");
+      const name = store.getProfile().name || "Candidate";
+      downloadBlob(
+        await buildLetterPdf(name, `Cover Letter — ${app.jobTitle}, ${app.company}`, app.coverLetter),
+        `${name.replace(/\s+/g, "_")}_CoverLetter_${app.company.replace(/\s+/g, "_")}.pdf`
+      );
+    } catch {
+      setCopied("failed:pdf");
+      setTimeout(() => setCopied(""), 3000);
+    }
+  }
 
   async function copy(label: string, text: string) {
     // Reports a failed copy instead of claiming success: an empty paste into an
@@ -451,18 +500,17 @@ function AppCard({
       </div>
 
       <div className="flex flex-wrap gap-2 mt-3">
-        {job &&
-          portals.map((p) => (
-            <a
-              key={p}
-              href={portalSearchUrl(p, job)}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-secondary text-xs px-3 py-1.5"
-            >
-              Apply on {p} ↗
-            </a>
-          ))}
+        {portals.map((p) => (
+          <a
+            key={p}
+            href={safeHref(portalSearchUrl(p, job))}
+            target="_blank"
+            rel="noreferrer"
+            className="btn-secondary text-xs px-3 py-1.5"
+          >
+            Apply on {p} ↗
+          </a>
+        ))}
         {safeHref(app.url) && (
           <a href={safeHref(app.url)} target="_blank" rel="noreferrer" className="btn-secondary text-xs px-3 py-1.5">
             Direct listing ↗
@@ -499,11 +547,11 @@ function AppCard({
                 className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border capitalize transition ${
                   app.outcome === o
                     ? o === "offer"
-                      ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
+                      ? "chip-on"
                       : o === "rejected" || o === "ghosted"
                       ? "bg-coral-500/15 text-coral-400 border-coral-500/40"
                       : "bg-sky2-500/15 text-sky2-400 border-sky2-500/40"
-                    : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                    : "chip-off"
                 }`}
               >
                 {o}
@@ -525,23 +573,8 @@ function AppCard({
                 Cover letter
               </h4>
               <div className="flex gap-3">
-                <button
-                  className="text-xs text-neon-400 hover:underline"
-                  onClick={async () => {
-                    const { buildLetterPdf, downloadBlob } = await import("@/lib/pdf/resumeDoc");
-                    const { store } = await import("@/lib/store");
-                    const name = store.getProfile().name || "Candidate";
-                    downloadBlob(
-                      await buildLetterPdf(
-                        name,
-                        `Cover Letter — ${app.jobTitle}, ${app.company}`,
-                        app.coverLetter
-                      ),
-                      `${name.replace(/\s+/g, "_")}_CoverLetter_${app.company.replace(/\s+/g, "_")}.pdf`
-                    );
-                  }}
-                >
-                  ⬇ PDF
+                <button className="text-xs text-neon-400 hover:underline" onClick={downloadLetter}>
+                  {copied === "failed:pdf" ? "PDF failed" : "⬇ PDF"}
                 </button>
                 <button
                   className="text-xs text-neon-400 hover:underline"

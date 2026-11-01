@@ -113,7 +113,7 @@ export default function GithubPage() {
       </div>
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}

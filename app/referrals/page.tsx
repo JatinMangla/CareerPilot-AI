@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
+import { isVerifiedSource } from "@/lib/ats";
+import { isBlockedListing } from "@/lib/jobFilters";
 import { Pager, usePaged } from "@/components/Pager";
 import type { Job, ReferralPlan, ReferralRecord, ReferralStage } from "@/lib/types";
 import CopyButton from "@/components/CopyButton";
@@ -97,7 +99,21 @@ export default function ReferralsPage() {
     router.push("/outreach");
   }
 
-  const withoutPlan = jobs.filter((j) => !records.some((r) => r.jobId === j.id));
+  // Best matches first. This took the first twelve in the order they were found,
+  // and anything after them could not be reached at all.
+  const withoutPlan = useMemo(
+    () =>
+      jobs
+        .filter(
+          (j) =>
+            !records.some((r) => r.jobId === j.id) &&
+            isVerifiedSource(j.source) &&
+            !isBlockedListing(j.url, j.company)
+        )
+        .sort((a, b) => b.matchScore - a.matchScore),
+    [jobs, records]
+  );
+  const pickPage = usePaged(withoutPlan, PAGE_SIZE, null);
   const referred = records.filter((r) => r.stage === "referred").length;
   const asked = records.filter((r) => r.stage !== "planned").length;
 
@@ -113,7 +129,7 @@ export default function ReferralsPage() {
         </p>
       </div>
 
-      <div className="text-xs text-ink-300 bg-sky2-500/10 border border-sky2-500/25 rounded-xl px-4 py-3 leading-relaxed">
+      <div className="alert-info">
         <b className="text-sky2-400">What this does and doesn&apos;t do.</b> It writes the ask
         and tells you exactly who to look for — it can&apos;t find people for you, because
         scraping LinkedIn violates their terms and risks your account. You do the searching
@@ -121,7 +137,7 @@ export default function ReferralsPage() {
       </div>
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}
@@ -152,7 +168,7 @@ export default function ReferralsPage() {
             )}
           </p>
         ) : (
-          withoutPlan.slice(0, 12).map((job) => (
+          pickPage.pageItems.map((job) => (
             <div
               key={job.id}
               className="flex items-center gap-3 rounded-xl px-3 py-2.5 bg-ink-850"
@@ -173,6 +189,13 @@ export default function ReferralsPage() {
             </div>
           ))
         )}
+        <Pager
+          page={pickPage.page}
+          pageCount={pickPage.pageCount}
+          total={withoutPlan.length}
+          unit="jobs"
+          onPage={pickPage.setPage}
+        />
       </div>
 
       {/* Plans */}
@@ -199,8 +222,8 @@ export default function ReferralsPage() {
                     aria-pressed={rec.stage === s.key}
                     className={`rounded-full px-3 py-1 text-[11px] font-semibold border transition ${
                       rec.stage === s.key
-                        ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
-                        : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                        ? "chip-on"
+                        : "chip-off"
                     }`}
                   >
                     {s.label}
@@ -256,7 +279,9 @@ export default function ReferralsPage() {
                   </Block>
 
                   <Copyable
-                    title={`LinkedIn connection note (${rec.plan.connectionNote.length}/300)`}
+                    title={`LinkedIn connection note (${rec.plan.connectionNote.length}/300${
+                      rec.plan.connectionNote.length > 300 ? " — too long, LinkedIn will refuse it" : ""
+                    })`}
                     text={rec.plan.connectionNote}
                   />
                   <Copyable title="Referral message (after they accept)" text={rec.plan.referralMessage} />

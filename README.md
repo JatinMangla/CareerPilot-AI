@@ -1,58 +1,54 @@
 # CareerPilot AI
 
-Personal AI career copilot for Jatin Mangla — resume improvement, industry-standard
-validation, job-tailoring (with approval flow), job matching with pros/cons analysis,
-auto-apply pipeline, Gmail job-inbox triage, HR outreach, mock interviews
-(oral / video / text), coding practice, and a self-evolving AI strategy.
+Personal AI career copilot: resume improvement and validation, per-job tailoring with an
+approval step, job matching with pros and cons, an apply pipeline that prepares everything and
+leaves the final click to you, Gmail job-inbox triage, HR outreach, mock interviews, coding
+practice, and a self-evolving AI strategy.
+
+For how the app works and what is in progress, see [docs/PROJECT-STATUS.md](docs/PROJECT-STATUS.md).
 
 ## Stack
 
-- Next.js 14 (App Router) + TypeScript + Tailwind CSS
-- Backend = Next.js API routes (deploys as serverless functions on Vercel — no separate backend needed)
-- Google Gemini (free tier) with per-task model tiers, schema-enforced JSON and SSE streaming
-- Single-user auth (HMAC-signed cookie), state synced across devices via Upstash Redis
+- Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS 4
+- Backend: Next.js API routes on Vercel; there is no separate server
+- Google Gemini (free tier), with per-task model chains, schema-enforced JSON and SSE streaming
+- Single-user auth (emailed code or password, signed cookie), with state synced across devices
+  through Upstash Redis
 
 ## Run locally
 
 ```bash
 npm install
-# edit .env.local → set ANTHROPIC_API_KEY (and change AUTH_PASSWORD)
+cp .env.local.example .env.local   # then fill in the values
 npm run dev
 ```
 
-Open http://localhost:3000 → log in with `jatinmangla123@gmail.com` + the password from
-`.env.local` (default: `careerpilot`).
+Open http://localhost:3000 and sign in with `AUTH_EMAIL` and `AUTH_PASSWORD` from `.env.local`.
+There are no default credentials.
 
 ## Deploy to Vercel
 
-```bash
-npm i -g vercel
-vercel login          # log in as jatinmanglas-projects
-vercel                # first deploy (accept defaults)
-vercel --prod         # production deploy
-```
-
-Then in the Vercel dashboard → Project → Settings → Environment Variables, add:
+The `main` branch is connected to Vercel and deploys on push. Set these in the Vercel dashboard
+under Project → Settings → Environment Variables:
 
 | Name                                             | Value                                          |
 | ------------------------------------------------ | ---------------------------------------------- |
-| `GEMINI_API_KEY`                                  | free key from aistudio.google.com/apikey       |
-| `AUTH_EMAIL`                                      | jatinmangla123@gmail.com                       |
-| `AUTH_PASSWORD`                                   | a strong password                              |
-| `AUTH_SECRET`                                     | any long random string                         |
-| `UPSTASH_REDIS_REST_URL` / `_TOKEN`               | cross-device sync (or Vercel's `KV_REST_API_*`)|
-| `GMAIL_USER` / `GMAIL_APP_PASSWORD`               | Job Inbox + HR Outreach                        |
-| `RESEND_API_KEY`                                  | (optional) emailed login codes                 |
-| `OPENWEBNINJA_API_KEY`, `ADZUNA_APP_ID` / `_KEY`  | (optional) wider job aggregator coverage       |
-
-Redeploy after adding env vars (`vercel --prod`).
+| `GEMINI_API_KEY`                                 | free key from aistudio.google.com/apikey       |
+| `AUTH_EMAIL`                                     | the one account allowed in                     |
+| `AUTH_PASSWORD`                                  | a strong password                              |
+| `AUTH_SECRET`                                    | any long random string                         |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN`              | cross-device sync (or Vercel's `KV_REST_API_*`)|
+| `GMAIL_USER` / `GMAIL_APP_PASSWORD`              | Job Inbox + HR Outreach                        |
+| `RESEND_API_KEY`                                 | (optional) emailed login codes                 |
+| `OPENWEBNINJA_API_KEY`, `ADZUNA_APP_ID` / `_KEY` | (optional) wider job aggregator coverage       |
+| `GITHUB_TOKEN`                                   | (optional) a higher GitHub Review rate limit   |
 
 ## Notes
 
-- **Auto-apply**: prepares everything (cover letter, tailored bullets, screening
-  answers) and gives one-click portal links. Fully-automated bot submission on
-  LinkedIn/Naukri violates their ToS and risks account bans, so the final click is yours.
-- **Job listings**: with Adzuna keys you get live listings analyzed by AI; without them
-  the AI researches representative openings (clearly labeled — verify before applying).
-- **Evolve AI**: rewrites the AI's own operating strategy from your usage + feedback and
-  injects it into all future prompts.
+- **Nothing submits an application.** The app and the local agent prepare everything and open
+  each application for you to submit. A sent application cannot be recalled.
+- **Job listings** come from 120 company boards (Greenhouse, Lever, Ashby) with no key needed,
+  plus JSearch and Adzuna when configured. AI-researched leads appear only when you ask for them
+  and cannot enter the apply pipeline.
+- **Evolve AI** rewrites the AI's operating strategy from your results and feedback, and adds it
+  to every later prompt.

@@ -133,12 +133,20 @@ function pruneTomb(tomb: Tombstones, now: number): Tombstones {
  * stored copy (or are appended); removed ids are dropped and tombstoned; nothing
  * tombstoned survives. Order: stored order, with new items at the end — the
  * pages sort lists themselves, so this only has to be stable.
+ *
+ * `at` is when the device made this change. A tombstone stops an OLD copy coming
+ * back; it must not stop someone adding the item again on purpose. Without this,
+ * "Clear list" then a new search lost every job from a company board, whose ids
+ * are stable, and un-dismissing then re-dismissing a job did nothing elsewhere.
+ * So a real diff made after the removal lifts it. A `full` upload never does:
+ * that is exactly the stale copy tombstones exist to refuse.
  */
 export function applyListPatch(
   key: string,
   stored: Envelope | null,
   patch: ListPatch,
-  now: number
+  now: number,
+  at = 0
 ): { value: unknown[]; tomb: Tombstones } {
   const tomb = pruneTomb({ ...(stored?.tomb || {}) }, now);
   for (const id of patch.removed) tomb[id] = now;
@@ -147,7 +155,9 @@ export function applyListPatch(
   const changedById = new Map<string, unknown>();
   for (const item of patch.changed) {
     const id = itemId(key, item);
-    if (id !== null) changedById.set(id, item);
+    if (id === null) continue;
+    changedById.set(id, item);
+    if (!patch.full && tomb[id] && at > tomb[id]) delete tomb[id];
   }
 
   const out: unknown[] = [];
@@ -192,10 +202,16 @@ export function resolveWrite(
   const upToDate = !legacy && incoming.baseRev === storedRev;
 
   if (isCollection(key) && incoming.patch) {
-    const { value, tomb } = applyListPatch(key, stored, incoming.patch, now);
+    const { value, tomb } = applyListPatch(key, stored, incoming.patch, now, at);
     const env: Envelope = { value, at: Math.max(at, stored?.at ?? 0), tomb };
-    // Up to date, with a real diff, means the device already holds the result.
-    return upToDate && !incoming.patch.full
+    // Up to date, with a real diff, means the device already holds the result —
+    // unless a tombstone refused one of its items, when it would otherwise keep
+    // showing something no other device will ever see.
+    const refused = incoming.patch.changed.some((item) => {
+      const id = itemId(key, item);
+      return id !== null && !!tomb[id];
+    });
+    return upToDate && !incoming.patch.full && !refused
       ? { write: env }
       : { write: env, adopt: { value, at: env.at } };
   }

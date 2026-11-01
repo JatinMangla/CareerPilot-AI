@@ -3,13 +3,19 @@ import { requireSession } from "@/lib/session";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+/** Vercel refuses bodies over 4.5MB before this code runs, with an HTML error page. */
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+
 export async function POST(req: Request) {
   const denied = await requireSession();
   if (denied) return denied;
-  const form = await req.formData();
-  const file = form.get("file");
+  const form = await req.formData().catch(() => null);
+  const file = form?.get("file");
   if (!(file instanceof File)) {
     return Response.json({ error: "No file uploaded" }, { status: 400 });
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return Response.json({ error: "That file is over 4 MB. Upload a smaller one, or paste the text." }, { status: 413 });
   }
 
   const buf = Buffer.from(await file.arrayBuffer());
@@ -23,8 +29,13 @@ export async function POST(req: Request) {
       // parse files uploaded from anywhere.
       const { extractText, getDocumentProxy } = await import("unpdf");
       const pdf = await getDocumentProxy(new Uint8Array(buf));
-      const result = await extractText(pdf, { mergePages: true });
-      text = Array.isArray(result.text) ? result.text.join("\n") : result.text;
+      try {
+        const result = await extractText(pdf, { mergePages: true });
+        text = Array.isArray(result.text) ? result.text.join("\n") : result.text;
+      } finally {
+        // pdf.js holds its worker state until told; a warm function reuses this process.
+        await pdf.loadingTask.destroy().catch(() => {});
+      }
     } else if (name.endsWith(".docx")) {
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ buffer: buf });

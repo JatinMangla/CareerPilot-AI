@@ -10,6 +10,8 @@ next-env.d.ts
 
 .vercel
 .env*
+# The template holds no secrets, and setup instructions point at it.
+!.env.local.example
 
 # Auto-apply agent — local runtime + personal application data
 agent/node_modules/

@@ -1,11 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { store } from "@/lib/store";
 import { jsonTask } from "@/lib/aiClient";
 import type { PracticeQuestion, SolutionReview } from "@/lib/types";
 
+/** This device's question and code, so leaving the page doesn't lose the work. */
+const SESSION_KEY = "cp_practice_session";
+
 const TOPICS = [
+  "Data fetching with loading and error states",
+  "Forms and validation",
+  "Search, filter and sort a list",
+  "Modals, tabs and accessible UI",
   "JavaScript arrays & strings",
   "JavaScript closures & scope",
   "Promises & async",
@@ -27,6 +34,29 @@ export default function PracticePage() {
   const [busy, setBusy] = useState<"" | "question" | "review">("");
   const [error, setError] = useState("");
   const [showOptimal, setShowOptimal] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(SESSION_KEY) || "null");
+      if (saved?.q) {
+        setQ(saved.q);
+        setCode(saved.code || "");
+        setReview(saved.review || null);
+        setSeen(saved.seen || []);
+      }
+    } catch {
+      /* nothing to restore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!q) return;
+    try {
+      window.localStorage.setItem(SESSION_KEY, JSON.stringify({ q, code, review, seen }));
+    } catch {
+      /* storage full — the page still works, it just won't resume */
+    }
+  }, [q, code, review, seen]);
 
   async function newQuestion() {
     if (busy) return;
@@ -129,8 +159,8 @@ export default function PracticePage() {
               aria-pressed={format === o.k}
               className={`rounded-full px-3.5 py-1.5 text-xs font-semibold border transition ${
                 format === o.k
-                  ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
-                  : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                  ? "chip-on"
+                  : "chip-off"
               }`}
             >
               {o.label}
@@ -139,7 +169,7 @@ export default function PracticePage() {
         </div>
       </div>
 
-      <div className="text-xs text-ink-300 bg-sky2-500/10 border border-sky2-500/25 rounded-xl px-4 py-3 leading-relaxed">
+      <div className="alert-info">
         <b className="text-sky2-400">Practise what they actually ask.</b> Frontend loops are
         mostly a 45–60 minute pair-programming round — fetch an API and render a filterable
         list, handle loading and error states, debounce a search. Algorithm puzzles are a
@@ -147,7 +177,7 @@ export default function PracticePage() {
       </div>
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}

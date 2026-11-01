@@ -7,7 +7,7 @@ import { jsonTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { Pager, usePaged } from "@/components/Pager";
 import { isTransactional, trimForStorage } from "@/lib/inboxFilters";
-import { applicationsAt, recordOutcome } from "@/lib/outcomes";
+import { applicationsAt, recordOutcome, trackedApplications, type TrackedApplication } from "@/lib/outcomes";
 import { useCancellable } from "@/lib/useCancellable";
 import RunProgress from "@/components/RunProgress";
 import type { InboxCursor, InboxMessage, MailCategory, OutcomeStage } from "@/lib/types";
@@ -266,7 +266,8 @@ export default function InboxPage() {
   }
 
   function markHandled(uid: string) {
-    const next = messages.map((m) => (m.uid === uid ? { ...m, handled: true } : m));
+    // From the store, not this render: a sync can land while the page is open.
+    const next = store.getInbox().map((m) => (m.uid === uid ? { ...m, handled: true } : m));
     store.setInbox(next);
     setMessages(next);
   }
@@ -278,9 +279,16 @@ export default function InboxPage() {
       role: m.role || "React Developer",
       company: m.company || "",
       context: `Their email (subject: "${m.subject}"):\n\n${m.body}`,
+      inReplyTo: m.messageId,
+      replySubject: m.subject,
+      inboxUid: m.uid,
     });
     router.push("/outreach");
   }
+
+  // Once per change of the list, not once per email on the page: each read parses
+  // the stored applications, tailored resumes and all.
+  const tracked = useMemo(() => trackedApplications(), [messages]);
 
   const jobMail = useMemo(
     () => messages.filter((m) => m.category && m.category !== "not_job"),
@@ -350,7 +358,7 @@ export default function InboxPage() {
 
       <RunProgress text={progress} onStop={busy ? run.cancel : undefined} />
       {notice && !busy && (
-        <div className="text-sm text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3 flex items-start gap-3">
+        <div className="alert-success flex items-start gap-3">
           <span className="flex-1">{notice}</span>
           <button
             className="text-ink-400 hover:text-ink-200 shrink-0"
@@ -362,7 +370,7 @@ export default function InboxPage() {
         </div>
       )}
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3 whitespace-pre-wrap">
+        <div className="alert-error whitespace-pre-wrap">
           {error}
         </div>
       )}
@@ -373,8 +381,11 @@ export default function InboxPage() {
           <p className="text-sm text-ink-300 leading-relaxed">
             Hit <b className="text-ink-100">Sync my inbox</b> and CareerPilot reads your
             Gmail over IMAP (read-only, using the same App Password as sending), then
-            sorts everything job-related into tabs. Non-job mail is discarded, never
-            shown. Nothing is stored on any server — messages live in this browser only.
+            sorts everything job-related into tabs. Non-job mail is hidden and its text
+            is not kept. Sender, subject and a short snippet go to Google&apos;s AI to sort
+            them, except bank, OTP and receipt mail, which is filed here without leaving
+            the app. Job mail is saved in this browser and synced to your own database,
+            so it appears on your other devices.
           </p>
         </div>
       )}
@@ -391,8 +402,8 @@ export default function InboxPage() {
                 title={t.hint}
                 className={`rounded-full px-4 py-1.5 text-xs font-semibold border transition ${
                   tab === t.key
-                    ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
-                    : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                    ? "chip-on"
+                    : "chip-off"
                 }`}
               >
                 {t.label}
@@ -450,7 +461,7 @@ export default function InboxPage() {
                     </span>
                   </div>
 
-                  <OutcomeLink message={m} />
+                  <OutcomeLink message={m} tracked={tracked} />
 
                   <div className="flex gap-3 mt-3 flex-wrap text-xs">
                     <button
@@ -517,10 +528,10 @@ export default function InboxPage() {
  * another page. Matching is by employer, so it only offers — never records on
  * its own.
  */
-function OutcomeLink({ message }: { message: InboxMessage }) {
+function OutcomeLink({ message, tracked }: { message: InboxMessage; tracked: TrackedApplication[] }) {
   const [done, setDone] = useState("");
   if (message.category !== "applied_reply" || !message.company) return null;
-  const matches = applicationsAt(message.company);
+  const matches = applicationsAt(message.company, tracked).slice();
   if (!matches.length) return null;
   const target = matches.sort((a, b) => b.appliedAt - a.appliedAt)[0];
 

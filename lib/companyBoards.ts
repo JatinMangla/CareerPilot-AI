@@ -14,7 +14,7 @@
  * ~120 boards / 15k+ live postings, which is what makes a real search possible.
  */
 
-import { dedupeJobs, matchesLocation, INDIA_RE } from "./jobFilters";
+import { dedupeJobs, reachableLocation, INDIA_RE } from "./jobFilters";
 
 export interface CompanyBoard {
   slug: string;
@@ -170,6 +170,8 @@ export interface BoardListing {
   description?: string;
   /** Greenhouse only: where the full posting is, fetched for the final shortlist. */
   detailUrl?: string;
+  /** Every office the role is open in, where the ATS lists more than one. */
+  locations?: string[];
 }
 
 /** Titles that are unambiguously frontend work. */
@@ -202,6 +204,9 @@ const WEAK_HINTS = [
   "application engineer",
   "member of technical staff",
   "sde",
+  "sde1",
+  "sde2",
+  "sde3",
   "mobile engineer",
   "react native",
 ];
@@ -247,10 +252,26 @@ const GENERIC_TERMS = new Set([
   "hiring",
 ]);
 
+/**
+ * Whole words. `includes` counted "vue" inside "Revenue", so a Revenue Analyst
+ * ranked as a strong frontend match, and "react" fired on "Reactor". The optional
+ * tail keeps "React.js", "Vue.js" and "AngularJS" matching.
+ */
+const hintRe = (hints: string[]) =>
+  new RegExp(
+    `(^|[^a-z0-9])(${hints.map((h) => h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(\\.?js)?($|[^a-z0-9])`,
+    "i"
+  );
+const STRONG_RE = hintRe(STRONG_HINTS);
+const WEAK_RE = hintRe(WEAK_HINTS);
+
+/** "Design Engineer" is a frontend title and also a chip-design one. */
+const HARDWARE_RE =
+  /\b(hardware|mechanical|electrical|firmware|asic|analog|rtl|vlsi|silicon|fpga|pcb|circuit|physical design)\b/i;
+
 function roleRank(title: string): number {
-  const t = title.toLowerCase();
-  if (STRONG_HINTS.some((h) => t.includes(h))) return 2;
-  if (WEAK_HINTS.some((h) => t.includes(h))) return 1;
+  if (STRONG_RE.test(title)) return 2;
+  if (WEAK_RE.test(title)) return 1;
   return 0;
 }
 
@@ -276,6 +297,7 @@ function levelMismatch(title: string, years: number): number {
 export function matchesRole(title: string, extraTerms: string[], years = 2): boolean {
   const t = title.toLowerCase();
   const rank = roleRank(title);
+  if (HARDWARE_RE.test(t)) return false;
   if (EXCLUDE_RE.test(t) && rank < 2) return false;
   if (ALWAYS_TOO_SENIOR_RE.test(t)) return false;
   if (STAFF_RE.test(t) && years < 8) return false;
@@ -387,6 +409,7 @@ async function fetchBoard(board: CompanyBoard, ms: number): Promise<BoardListing
       title: j.text,
       company: board.name,
       location: j.categories?.location || "",
+      locations: [j.categories?.location, ...(j.categories?.allLocations || [])].filter(Boolean),
       url: j.hostedUrl,
       postedAt: j.createdAt ? new Date(j.createdAt).toISOString() : undefined,
       ats: "lever",
@@ -399,11 +422,15 @@ async function fetchBoard(board: CompanyBoard, ms: number): Promise<BoardListing
   }
 
   const data = await fetchJson(`https://api.ashbyhq.com/posting-api/job-board/${board.slug}`, ms);
-  return (data?.jobs || []).map((j: any) => ({
+  return (data?.jobs || []).filter((j: any) => j.isListed !== false).map((j: any) => ({
     id: `ab-${board.slug}-${j.id}`,
     title: j.title,
     company: board.name,
     location: j.location || "",
+    locations: [
+      j.location,
+      ...(j.secondaryLocations || []).map((l: any) => l?.location),
+    ].filter(Boolean),
     url: j.jobUrl,
     postedAt: j.publishedAt,
     ats: "ashby",
@@ -489,14 +516,15 @@ export async function searchCompanyBoards(opts: {
   const all = await fetchAllBoards(boards, deadline);
 
   // Location matching is shared with the aggregator results in the API route, so
-  // a job is judged reachable by the same rule wherever it came from.
-  const matched = all.filter(
-    (j) =>
-      j.title &&
-      j.url &&
-      matchesRole(j.title, terms, years) &&
-      matchesLocation(j.location, location || "")
-  );
+  // a job is judged reachable by the same rule wherever it came from. The office
+  // that matched becomes the one shown, or the card would say "San Francisco" on
+  // a role that is here because it is open in Bengaluru.
+  const matched: BoardListing[] = [];
+  for (const j of all) {
+    if (!j.title || !j.url || !matchesRole(j.title, terms, years)) continue;
+    const reachable = reachableLocation(j.locations?.length ? j.locations : [j.location], location || "");
+    if (reachable !== null) matched.push({ ...j, location: reachable });
+  }
 
   // Frontend-specific roles first, then the ones at the right level, then
   // India-based over remote, then freshest.

@@ -22,7 +22,12 @@ import { getString, incrWithExpiry, kvConfigured } from "./kv";
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-/** One model call may not take longer than this. The route's maxDuration is 300s. */
+/**
+ * One non-streaming call may not take longer than this, and a stream may not go
+ * this long without a token. The route's maxDuration is 300s. It has to be a gap
+ * for streams, not a total: a long rewrite at high thinking can legitimately run
+ * past 90s, and a total limit cut it off while tokens were still arriving.
+ */
 const CALL_TIMEOUT_MS = 90_000;
 
 export type Tier = "fast" | "standard" | "deep";
@@ -180,9 +185,26 @@ function isTransient(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
+/**
+ * Failures the next model in the chain may not have. 404 is not transient, but it
+ * is how Google retires a model, and it must not end the chain: when 2.5-flash
+ * went, every tier that still named it stopped dead even though later links were
+ * healthy. It is not worth retrying on the same model, which is why this is
+ * separate from isTransient.
+ */
+function tryNextModel(status: number): boolean {
+  return isTransient(status) || status === 404;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function apiError(status: number, body: string): Error {
+  if (/^truncated/.test(body)) {
+    return Object.assign(
+      new Error("The AI ran out of room before finishing. Try again, or shorten what you sent."),
+      { status: 502 }
+    );
+  }
   if (status === 429) {
     return Object.assign(
       new Error(
@@ -194,8 +216,17 @@ function apiError(status: number, body: string): Error {
   if (status === 400 && /API key/i.test(body)) {
     return Object.assign(new Error("Invalid GEMINI_API_KEY."), { status });
   }
-  if (status === 408) {
+  if (status === 408 || status === 504) {
     return Object.assign(new Error("The AI took too long to answer. Try again."), { status: 504 });
+  }
+  if (status === 503 || status === 500 || status === 502) {
+    return Object.assign(new Error("Every AI model is busy right now. Try again in a moment."), { status });
+  }
+  if (status === 404) {
+    return Object.assign(
+      new Error("None of the configured AI models is available any more. They are listed in lib/gemini.ts."),
+      { status: 502 }
+    );
   }
   return Object.assign(new Error(`Gemini error ${status}: ${body.slice(0, 300)}`), { status });
 }
@@ -223,13 +254,15 @@ async function callModel(
         body: payload,
         signal: callSignal(signal),
       });
+      // Inside the try: the timeout also covers reading the body, and escaping
+      // from here reached the user as a raw "operation was aborted".
+      if (res.ok) return { ok: true, data: await res.json() };
     } catch (err: any) {
       if (signal?.aborted) throw err; // the browser left — stop the whole chain
       // Timed out: treat as overload and move down the chain.
       last = { ok: false, status: 504, body: "timed out" };
       break;
     }
-    if (res.ok) return { ok: true, data: await res.json() };
 
     const body = await res.text().catch(() => "");
     last = { ok: false, status: res.status, body };
@@ -269,7 +302,7 @@ async function generate(
     if (!result.ok) {
       lastStatus = result.status;
       lastBody = result.body;
-      if (isTransient(result.status)) {
+      if (tryNextModel(result.status)) {
         console.error("[gemini] model unavailable, falling back", {
           model: spec.id,
           status: result.status,
@@ -282,14 +315,19 @@ async function generate(
     const cand = result.data?.candidates?.[0];
     const text: string =
       cand?.content?.parts?.map((p: any) => p.text || "").join("") || "";
-    if (text) return { text, model: spec.id, fallback: index > 0 };
+    const finish: string | undefined = cand?.finishReason;
+    // Half a JSON document is worth nothing, and it used to surface as "malformed
+    // data, try again" — which fails the same way every time. Plain text is left
+    // to the caller, which can show what arrived.
+    const truncated = !!schema && !!finish && finish !== "STOP";
+    if (text && !truncated) return { text, model: spec.id, fallback: index > 0 };
 
-    // Empty candidate: usually the output budget was consumed by thinking, or a
+    // Empty or cut off: usually the output budget was consumed by thinking, or a
     // safety block. Both are worth one attempt on the next model down.
-    const reason = cand?.finishReason || result.data?.promptFeedback?.blockReason || "unknown";
-    console.error("[gemini] empty response, falling back", { model: spec.id, reason });
+    const reason = finish || result.data?.promptFeedback?.blockReason || "unknown";
+    console.error("[gemini] unusable response, falling back", { model: spec.id, reason, truncated });
     lastStatus = 502;
-    lastBody = `empty response (${reason})`;
+    lastBody = truncated ? `truncated (${reason})` : `empty response (${reason})`;
   }
 
   throw apiError(lastStatus || 502, lastBody || "no model returned a response");
@@ -379,18 +417,47 @@ export function geminiStream(
       for (const [index, spec] of models.entries()) {
         if (emitted) break;
         let finish = "";
+        // Fires when nothing has arrived for CALL_TIMEOUT_MS. Rearmed per read.
+        const stalled = new AbortController();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const arm = () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => stalled.abort(), CALL_TIMEOUT_MS);
+        };
+
+        const readFrame = (frame: string) => {
+          const line = frame.split(/\r?\n/).find((l) => l.startsWith("data:"));
+          if (!line) return;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") return;
+          try {
+            const json = JSON.parse(payload);
+            const cand = json?.candidates?.[0];
+            if (cand?.finishReason) finish = cand.finishReason;
+            if (json?.promptFeedback?.blockReason) finish = json.promptFeedback.blockReason;
+            const chunk = cand?.content?.parts?.map((p: any) => p.text || "").join("") || "";
+            if (chunk) {
+              emitted = true;
+              controller.enqueue(encoder.encode(chunk));
+            }
+          } catch {
+            /* a frame cut short by a dropped connection — `finish` then stays unset */
+          }
+        };
+
         try {
           void countCall();
+          arm();
           const res = await fetch(`${BASE}/${spec.id}:streamGenerateContent?alt=sse`, {
             method: "POST",
             headers: headers(key),
             body: requestBody(spec, system, user, maxTokens, thinking),
-            signal: callSignal(upstream.signal),
+            signal: AbortSignal.any([upstream.signal, stalled.signal]),
           });
 
           if (!res.ok || !res.body) {
             lastStatus = res.status;
-            if (isTransient(res.status)) {
+            if (tryNextModel(res.status)) {
               console.error("[gemini] stream model unavailable, falling back", {
                 model: spec.id,
                 status: res.status,
@@ -405,36 +472,23 @@ export function geminiStream(
           let buffer = "";
 
           for (;;) {
+            arm();
             const { done, value } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
 
             const frames = buffer.split(/\r?\n\r?\n/);
             buffer = frames.pop() ?? "";
-
-            for (const frame of frames) {
-              const line = frame.split(/\r?\n/).find((l) => l.startsWith("data:"));
-              if (!line) continue;
-              const payload = line.slice(5).trim();
-              if (!payload || payload === "[DONE]") continue;
-              try {
-                const json = JSON.parse(payload);
-                const cand = json?.candidates?.[0];
-                if (cand?.finishReason) finish = cand.finishReason;
-                if (json?.promptFeedback?.blockReason) finish = json.promptFeedback.blockReason;
-                const chunk = cand?.content?.parts?.map((p: any) => p.text || "").join("") || "";
-                if (chunk) {
-                  emitted = true;
-                  controller.enqueue(encoder.encode(chunk));
-                }
-              } catch {
-                /* partial frame — the next read completes it */
-              }
-            }
+            frames.forEach(readFrame);
           }
+          // The last frame need not end in a blank line, and it is the one that
+          // carries finishReason.
+          readFrame(buffer);
 
           if (emitted) {
-            const meta = { model: spec.id, fallback: index > 0, finish: finish || "STOP" };
+            // No finishReason means the connection ended, not the answer. This
+            // used to read as STOP, so a dropped stream could be saved as a resume.
+            const meta = { model: spec.id, fallback: index > 0, finish: finish || "DROPPED" };
             controller.enqueue(encoder.encode(`\n${STREAM_META}${JSON.stringify(meta)}]]`));
             controller.close();
             return;
@@ -455,13 +509,21 @@ export function geminiStream(
             controller.close();
             return;
           }
-          return fail(err?.message || "The AI request failed.");
+          // A real API error ends here. A timeout or a dropped connection has no
+          // status, and the next model may well answer: JSON tasks already walked
+          // the chain for these, streams gave up on the first.
+          if (typeof err?.status === "number") return fail(err.message);
+          lastStatus = 504;
+        } finally {
+          clearTimeout(timer);
         }
       }
 
       fail(
         lastStatus === 429
           ? "Every AI model is rate-limited right now — the free tier resets daily. Try again shortly."
+          : lastStatus === 504
+          ? "The AI took too long to answer. Try again."
           : "Every AI model is busy right now. Please try again in a moment."
       );
     },

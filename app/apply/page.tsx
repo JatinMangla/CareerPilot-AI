@@ -57,8 +57,8 @@ function ApplyTabs() {
             onClick={() => router.replace(`${pathname}?tab=${t.key}`, { scroll: false })}
             className={`rounded-xl px-4 py-2 text-sm font-semibold border transition ${
               tab === t.key
-                ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
-                : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                ? "chip-on"
+                : "chip-off"
             }`}
           >
             {t.label}

@@ -43,6 +43,33 @@ test("an item removed on one device is not resurrected by another", () => {
   assert.deepEqual(after.value.map((m) => m.uid), ["2"]);
 });
 
+test("re-adding a removed item on purpose lifts its tombstone", () => {
+  // Clear the list, then a new search finds the same board job with the same id.
+  const removed = applyListPatch("cp_jobs", { value: [{ id: "gh-1" }], at: now }, { changed: [], removed: ["gh-1"] }, now);
+  assert.deepEqual(removed.value, []);
+  const stored = { value: removed.value, at: now, tomb: removed.tomb };
+
+  const res = resolveWrite("cp_jobs", { at: now + 5000, baseRev: 2, patch: { changed: [{ id: "gh-1" }], removed: [] } }, stored, 2, now + 6000);
+  assert.deepEqual(res.write.value.map((j) => j.id), ["gh-1"]);
+  assert.equal(res.write.tomb["gh-1"], undefined);
+  assert.equal(res.adopt, undefined);
+});
+
+test("an offline edit older than the removal stays removed, and the device is told", () => {
+  const removed = applyListPatch("cp_jobs", { value: [{ id: "a" }, { id: "b" }], at: now }, { changed: [], removed: ["a"] }, now);
+  const stored = { value: removed.value, at: now, tomb: removed.tomb };
+  const res = resolveWrite("cp_jobs", { at: now - 5000, baseRev: 2, patch: { changed: [{ id: "a", note: "old" }], removed: [] } }, stored, 2, now + 1000);
+  assert.deepEqual(res.write.value.map((j) => j.id), ["b"]);
+  assert.deepEqual(res.adopt.value.map((j) => j.id), ["b"]);
+});
+
+test("a full upload never lifts a tombstone, however new its clock says it is", () => {
+  const removed = applyListPatch("cp_jobs", { value: [{ id: "a" }], at: now }, { changed: [], removed: ["a"] }, now);
+  const stored = { value: removed.value, at: now, tomb: removed.tomb };
+  const res = resolveWrite("cp_jobs", { at: now + 9000, baseRev: 0, patch: { changed: [{ id: "a" }], removed: [], full: true } }, stored, 2, now + 9000);
+  assert.deepEqual(res.write.value, []);
+});
+
 test("a device that saw the latest revision fast-forwards a value", () => {
   const res = resolveWrite("cp_profile", { at: now - 5000, baseRev: 3, value: { name: "new" } }, { value: { name: "old" }, at: now }, 3, now);
   assert.deepEqual(res.write.value, { name: "new" });

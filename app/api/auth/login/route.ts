@@ -37,13 +37,15 @@ export async function POST(req: Request) {
   }
 
   const { email, password } = await req.json().catch(() => ({}));
-  const ok =
-    typeof email === "string" &&
-    typeof password === "string" &&
-    // Both compared, always, so the response time says nothing about which failed.
-    (await secretsEqual(email.trim().toLowerCase(), allowedEmail)) &&
-    (await secretsEqual(password.trim(), allowedPassword));
-  if (!ok) {
+  if (typeof email !== "string" || typeof password !== "string") {
+    return Response.json({ error: "Invalid email or password." }, { status: 401 });
+  }
+  // Both compared, always, so the response time says nothing about which failed.
+  // Awaited separately: `a && b` skipped the password check for a wrong email,
+  // which is exactly the signal that would confirm the owner's address.
+  const emailOk = await secretsEqual(email.trim().toLowerCase(), allowedEmail);
+  const passwordOk = await secretsEqual(password.trim(), allowedPassword);
+  if (!emailOk || !passwordOk) {
     return Response.json({ error: "Invalid email or password." }, { status: 401 });
   }
 

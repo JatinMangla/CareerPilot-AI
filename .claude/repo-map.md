@@ -2,14 +2,14 @@
 
 <!-- GENERATED FILE. Do not edit by hand: node scripts/repo-map.mjs -->
 
-_86 source files · 14 pages · 11 API routes · 19 AI tasks · generated 2026-09-25_
+_92 source files · 15 pages · 11 API routes · 19 AI tasks · generated 2026-11-01_
 
 **Read this before exploring.** It is regenerated from the source, so it does not drift.
 For import relationships see [docs/dep-graph.md](../docs/dep-graph.md).
 
 ## What this is
 
-Single-user AI career copilot. Next.js 14 App Router + TypeScript + Tailwind, deployed on
+Single-user AI career copilot. Next.js 16 App Router + TypeScript + Tailwind 4, deployed on
 Vercel. API routes are the entire backend. Google Gemini (free tier) is the sole AI
 provider. User state lives in browser localStorage, mirrored to Upstash Redis for
 cross-device sync.
@@ -40,68 +40,74 @@ cross-device sync.
 |-- app/   # Next.js App Router — pages and API routes
 |   |-- api/   # server endpoints (deploy as Vercel serverless functions)
 |   |   |-- ai/
-|   |   |   `-- route.ts  (131)
+|   |   |   `-- route.ts  (138)
 |   |   |-- auth/
 |   |   |   |-- forgot/
-|   |   |   |   `-- route.ts  (95)
+|   |   |   |   `-- route.ts  (107)
 |   |   |   |-- login/
-|   |   |   |   `-- route.ts  (60)
+|   |   |   |   `-- route.ts  (62)
 |   |   |   |-- logout/
 |   |   |   |   `-- route.ts  (32)
 |   |   |   `-- verify/
 |   |   |       `-- route.ts  (101)
 |   |   |-- email/
 |   |   |   `-- send/
-|   |   |       `-- route.ts  (116)
+|   |   |       `-- route.ts  (136)
 |   |   |-- github/
-|   |   |   `-- route.ts  (110)
+|   |   |   `-- route.ts  (117)
 |   |   |-- inbox/
 |   |   |   `-- sync/
-|   |   |       `-- route.ts  (182)
+|   |   |       `-- route.ts  (209)
 |   |   |-- jobs/
-|   |   |   `-- route.ts  (282)
+|   |   |   `-- route.ts  (340)
 |   |   |-- parse-resume/
-|   |   |   `-- route.ts  (56)
+|   |   |   `-- route.ts  (67)
 |   |   `-- state/
-|   |       `-- route.ts  (181)
+|   |       `-- route.ts  (190)
 |   |-- apply/
 |   |   `-- page.tsx  (83)
 |   |-- evolve/
-|   |   `-- page.tsx  (491)
+|   |   `-- page.tsx  (321)
 |   |-- github/
 |   |   `-- page.tsx  (241)
 |   |-- inbox/
-|   |   `-- page.tsx  (554)
+|   |   `-- page.tsx  (565)
 |   |-- interview/
-|   |   `-- page.tsx  (428)
+|   |   `-- page.tsx  (435)
 |   |-- jobs/
-|   |   `-- page.tsx  (757)
+|   |   `-- page.tsx  (840)
 |   |-- login/
-|   |   `-- page.tsx  (227)
+|   |   `-- page.tsx  (230)
 |   |-- outreach/
-|   |   `-- page.tsx  (427)
+|   |   `-- page.tsx  (468)
 |   |-- practice/
-|   |   `-- page.tsx  (269)
+|   |   `-- page.tsx  (299)
+|   |-- profile/
+|   |   `-- page.tsx  (187)
 |   |-- referrals/
-|   |   `-- page.tsx  (319)
+|   |   `-- page.tsx  (344)
 |   |-- resume/
-|   |   `-- page.tsx  (494)
+|   |   `-- page.tsx  (507)
 |   |-- tailor/
-|   |   `-- page.tsx  (351)
+|   |   `-- page.tsx  (365)
 |   |-- validate/
-|   |   `-- page.tsx  (307)
+|   |   `-- page.tsx  (316)
 |   |-- error.tsx  (45)
 |   |-- globals.css
-|   |-- layout.tsx  (24)
-|   `-- page.tsx  (318)
+|   |-- icon.svg
+|   |-- layout.tsx  (38)
+|   |-- manifest.ts  (16)
+|   |-- not-found.tsx  (16)
+|   `-- page.tsx  (340)
 |-- components/   # shared client components
 |   |-- apply/
-|   |   |-- ApplyKits.tsx  (606)
-|   |   `-- AutoPilot.tsx  (865)
+|   |   |-- ApplyKits.tsx  (639)
+|   |   `-- AutoPilot.tsx  (887)
 |   |-- CopyButton.tsx  (42)
+|   |-- Icon.tsx  (41)
 |   |-- Pager.tsx  (123)
 |   |-- RunProgress.tsx  (27)
-|   |-- Shell.tsx  (153)
+|   |-- Shell.tsx  (222)
 |   |-- SyncProvider.tsx  (148)
 |   `-- UsageBanner.tsx  (43)
 |-- docs/   # generated documentation
@@ -111,22 +117,22 @@ cross-device sync.
 |   |-- pdf/   # react-pdf resume templates
 |   |   `-- resumeDoc.tsx  (261)
 |   |-- aiCache.ts  (61)
-|   |-- aiClient.ts  (205)
+|   |-- aiClient.ts  (218)
 |   |-- ats.ts  (215)
-|   |-- auth.ts  (160)
+|   |-- auth.ts  (158)
 |   |-- claimCheck.ts  (75)
 |   |-- claudePrompt.ts  (110)
 |   |-- clipboard.ts  (36)
-|   |-- companyBoards.ts  (526)
-|   |-- gemini.ts  (473)
+|   |-- companyBoards.ts  (554)
+|   |-- gemini.ts  (535)
 |   |-- inboxFilters.ts  (56)
-|   |-- jobFilters.ts  (242)
-|   |-- jobScore.ts  (136)
+|   |-- jobFilters.ts  (291)
+|   |-- jobScore.ts  (160)
 |   |-- kv.ts  (271)
-|   |-- mail.ts  (22)
+|   |-- mail.ts  (27)
 |   |-- openTabs.ts  (51)
 |   |-- otp.ts  (51)
-|   |-- outcomes.ts  (212)
+|   |-- outcomes.ts  (227)
 |   |-- pool.ts  (87)
 |   |-- prompts.ts  (820)
 |   |-- quota.ts  (85)
@@ -135,9 +141,10 @@ cross-device sync.
 |   |-- safeUrl.ts  (16)
 |   |-- session.ts  (64)
 |   |-- stableJson.ts  (22)
-|   |-- store.ts  (694)
-|   |-- syncMerge.ts  (211)
-|   |-- types.ts  (351)
+|   |-- store.ts  (742)
+|   |-- syncMerge.ts  (227)
+|   |-- today.ts  (177)
+|   |-- types.ts  (363)
 |   `-- useCancellable.ts  (26)
 |-- scripts/   # repo tooling — run with plain node, no npm
 |   |-- hooks/
@@ -150,24 +157,25 @@ cross-device sync.
 |   |-- dep-graph.mjs  (165)
 |   |-- doctor.mjs  (175)
 |   |-- repo-map.mjs  (231)
-|   |-- test.mjs  (92)
+|   |-- test.mjs  (94)
 |   |-- token-budget.json
 |   `-- tree.mjs  (97)
 |-- tests/
 |   |-- agentFields.test.mjs  (35)
+|   |-- gemini.test.mjs  (114)
 |   |-- helpers.mjs  (10)
-|   |-- jobFilters.test.mjs  (78)
-|   |-- scoring.test.mjs  (94)
-|   `-- syncMerge.test.mjs  (70)
+|   |-- jobFilters.test.mjs  (108)
+|   |-- scoring.test.mjs  (128)
+|   |-- syncMerge.test.mjs  (97)
+|   `-- today.test.mjs  (81)
 |-- .gitignore
 |-- .nvmrc
 |-- CLAUDE.md
 |-- README.md
-|-- next.config.mjs  (59)
+|-- next.config.mjs  (36)
 |-- package.json
-|-- postcss.config.mjs  (10)
-|-- proxy.ts  (41)
-|-- tailwind.config.ts  (55)
+|-- postcss.config.mjs  (9)
+|-- proxy.ts  (97)
 `-- tsconfig.json
 ```
 
@@ -175,20 +183,21 @@ cross-device sync.
 
 | URL | File | Lines |
 | --- | --- | --- |
-| `/` | [app/page.tsx](../app/page.tsx) | 318 |
+| `/` | [app/page.tsx](../app/page.tsx) | 340 |
 | `/apply` | [app/apply/page.tsx](../app/apply/page.tsx) | 83 |
-| `/evolve` | [app/evolve/page.tsx](../app/evolve/page.tsx) | 491 |
+| `/evolve` | [app/evolve/page.tsx](../app/evolve/page.tsx) | 321 |
 | `/github` | [app/github/page.tsx](../app/github/page.tsx) | 241 |
-| `/inbox` | [app/inbox/page.tsx](../app/inbox/page.tsx) | 554 |
-| `/interview` | [app/interview/page.tsx](../app/interview/page.tsx) | 428 |
-| `/jobs` | [app/jobs/page.tsx](../app/jobs/page.tsx) | 757 |
-| `/login` | [app/login/page.tsx](../app/login/page.tsx) | 227 |
-| `/outreach` | [app/outreach/page.tsx](../app/outreach/page.tsx) | 427 |
-| `/practice` | [app/practice/page.tsx](../app/practice/page.tsx) | 269 |
-| `/referrals` | [app/referrals/page.tsx](../app/referrals/page.tsx) | 319 |
-| `/resume` | [app/resume/page.tsx](../app/resume/page.tsx) | 494 |
-| `/tailor` | [app/tailor/page.tsx](../app/tailor/page.tsx) | 351 |
-| `/validate` | [app/validate/page.tsx](../app/validate/page.tsx) | 307 |
+| `/inbox` | [app/inbox/page.tsx](../app/inbox/page.tsx) | 565 |
+| `/interview` | [app/interview/page.tsx](../app/interview/page.tsx) | 435 |
+| `/jobs` | [app/jobs/page.tsx](../app/jobs/page.tsx) | 840 |
+| `/login` | [app/login/page.tsx](../app/login/page.tsx) | 230 |
+| `/outreach` | [app/outreach/page.tsx](../app/outreach/page.tsx) | 468 |
+| `/practice` | [app/practice/page.tsx](../app/practice/page.tsx) | 299 |
+| `/profile` | [app/profile/page.tsx](../app/profile/page.tsx) | 187 |
+| `/referrals` | [app/referrals/page.tsx](../app/referrals/page.tsx) | 344 |
+| `/resume` | [app/resume/page.tsx](../app/resume/page.tsx) | 507 |
+| `/tailor` | [app/tailor/page.tsx](../app/tailor/page.tsx) | 365 |
+| `/validate` | [app/validate/page.tsx](../app/validate/page.tsx) | 316 |
 
 ## API routes
 
@@ -247,33 +256,36 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | File | Lines | Exports | Imported by |
 | --- | --- | --- | --- |
 | [app/error.tsx](../app/error.tsx) | 45 | Error | 0 |
-| [app/layout.tsx](../app/layout.tsx) | 24 | RootLayout, metadata | 0 |
+| [app/layout.tsx](../app/layout.tsx) | 38 | metadata, viewport | 0 |
+| [app/manifest.ts](../app/manifest.ts) | 16 | manifest | 0 |
+| [app/not-found.tsx](../app/not-found.tsx) | 16 | NotFound | 0 |
 | [components/CopyButton.tsx](../components/CopyButton.tsx) | 42 | CopyButton | 5 |
+| [components/Icon.tsx](../components/Icon.tsx) | 41 | Icon, IconName | 1 |
 | [components/Pager.tsx](../components/Pager.tsx) | 123 | Pager, usePaged | 6 |
 | [components/RunProgress.tsx](../components/RunProgress.tsx) | 27 | RunProgress | 4 |
-| [components/Shell.tsx](../components/Shell.tsx) | 153 | Shell | 1 |
+| [components/Shell.tsx](../components/Shell.tsx) | 222 | Shell | 1 |
 | [components/SyncProvider.tsx](../components/SyncProvider.tsx) | 148 | SyncBadge, SyncProvider | 1 |
 | [components/UsageBanner.tsx](../components/UsageBanner.tsx) | 43 | UsageBanner | 1 |
-| [components/apply/ApplyKits.tsx](../components/apply/ApplyKits.tsx) | 606 | ApplyKits | 1 |
-| [components/apply/AutoPilot.tsx](../components/apply/AutoPilot.tsx) | 865 | AutoPilot | 1 |
+| [components/apply/ApplyKits.tsx](../components/apply/ApplyKits.tsx) | 639 | ApplyKits | 1 |
+| [components/apply/AutoPilot.tsx](../components/apply/AutoPilot.tsx) | 887 | AutoPilot | 1 |
 | [lib/aiCache.ts](../lib/aiCache.ts) | 61 | cacheKey, readCache, writeCache | 1 |
-| [lib/aiClient.ts](../lib/aiClient.ts) | 205 | AiMeta, IncompleteStreamError, StreamOptions, TaskOptions, jsonTask, streamTask | 13 |
-| [lib/ats.ts](../lib/ats.ts) | 215 | AtsInfo, AtsKind, atsBadgeTone, detectAts, isVerifiedSource | 2 |
-| [lib/auth.ts](../lib/auth.ts) | 160 | OTP_COOKIE, OTP_MAX_ATTEMPTS, SESSION_COOKIE, SESSION_MAX_AGE_MS, SessionInfo, createSessionToken, generateNonce, generateOtpCode, +6 | 7 |
-| [lib/claimCheck.ts](../lib/claimCheck.ts) | 75 | ClaimReport, confirmMarkers, describeClaims, newClaims | 2 |
+| [lib/aiClient.ts](../lib/aiClient.ts) | 218 | AiMeta, IncompleteStreamError, StreamOptions, TaskOptions, jsonTask, streamTask | 13 |
+| [lib/ats.ts](../lib/ats.ts) | 215 | AtsInfo, AtsKind, atsBadgeTone, detectAts, isVerifiedSource | 5 |
+| [lib/auth.ts](../lib/auth.ts) | 158 | OTP_COOKIE, OTP_MAX_ATTEMPTS, SESSION_COOKIE, SESSION_MAX_AGE_MS, SessionInfo, createSessionToken, generateNonce, generateOtpCode, +6 | 7 |
+| [lib/claimCheck.ts](../lib/claimCheck.ts) | 75 | ClaimReport, confirmMarkers, describeClaims, newClaims | 3 |
 | [lib/claudePrompt.ts](../lib/claudePrompt.ts) | 110 | ClaudePromptInput, buildClaudeStrategyPrompt | 1 |
 | [lib/clipboard.ts](../lib/clipboard.ts) | 36 | copyText | 2 |
-| [lib/companyBoards.ts](../lib/companyBoards.ts) | 526 | BoardListing, COMPANY_BOARDS, CompanyBoard, htmlToText, jdExcerpt, matchesRole, searchCompanyBoards | 1 |
-| [lib/gemini.ts](../lib/gemini.ts) | 473 | Generated, STREAM_ERROR, STREAM_META, Tier, geminiJson, geminiStream, geminiText, pacificDay, +1 | 1 |
+| [lib/companyBoards.ts](../lib/companyBoards.ts) | 554 | BoardListing, COMPANY_BOARDS, CompanyBoard, htmlToText, jdExcerpt, matchesRole, searchCompanyBoards | 1 |
+| [lib/gemini.ts](../lib/gemini.ts) | 535 | Generated, STREAM_ERROR, STREAM_META, Tier, geminiJson, geminiStream, geminiText, pacificDay, +1 | 1 |
 | [lib/inboxFilters.ts](../lib/inboxFilters.ts) | 56 | isTransactional, trimForStorage | 1 |
-| [lib/jobFilters.ts](../lib/jobFilters.ts) | 242 | BLOCKED_JOB_HOSTS, INDIA_RE, countryCode, dedupeJobs, fingerprint, isBlockedListing, matchesLocation, sourceRank | 7 |
-| [lib/jobScore.ts](../lib/jobScore.ts) | 136 | QuickScore, quickScore, requiredYears | 1 |
+| [lib/jobFilters.ts](../lib/jobFilters.ts) | 291 | BLOCKED_JOB_HOSTS, INDIA_RE, MAX_SAVED_JOBS, countryCode, dedupeJobs, fingerprint, isBlockedListing, matchesLocation, +3 | 9 |
+| [lib/jobScore.ts](../lib/jobScore.ts) | 160 | QuickScore, quickScore, requiredYears | 1 |
 | [lib/kv.ts](../lib/kv.ts) | 271 | casWrite, clearAll, deleteField, deleteKey, expire, getMany, getString, hgetallRaw, +10 | 7 |
-| [lib/mail.ts](../lib/mail.ts) | 22 | sendOwnerMail | 2 |
+| [lib/mail.ts](../lib/mail.ts) | 27 | sendOwnerMail | 2 |
 | [lib/openTabs.ts](../lib/openTabs.ts) | 51 | OpenResult, TAB_BATCH, blockedHint, openTabs | 2 |
 | [lib/otp.ts](../lib/otp.ts) | 51 | OTP_TTL_SEC, OtpResult, issueOtp, verifyOtp | 2 |
-| [lib/outcomes.ts](../lib/outcomes.ts) | 212 | BreakdownRow, Funnel, TrackedApplication, applicationStamp, applicationsAt, breakdown, channelOf, funnelOf, +6 | 6 |
-| [lib/pdf/resumeDoc.tsx](../lib/pdf/resumeDoc.tsx) | 261 | ResumeTemplate, buildLetterPdf, buildResumePdf, downloadBlob, parseResume | 5 |
+| [lib/outcomes.ts](../lib/outcomes.ts) | 227 | BreakdownRow, Funnel, TrackedApplication, applicationStamp, applicationsAt, appliedJobs, breakdown, channelOf, +7 | 7 |
+| [lib/pdf/resumeDoc.tsx](../lib/pdf/resumeDoc.tsx) | 261 | ResumeTemplate, buildLetterPdf, buildResumePdf, downloadBlob, parseResume | 6 |
 | [lib/pool.ts](../lib/pool.ts) | 87 | AI_CONCURRENCY, PoolOutcome, mapPool | 4 |
 | [lib/prompts.ts](../lib/prompts.ts) | 820 | SYSTEM_BASE, TaskDef, TaskTier, systemBase, tasks | 1 |
 | [lib/quota.ts](../lib/quota.ts) | 85 | QuotaInfo, quota | 4 |
@@ -282,19 +294,21 @@ the `jsonTask`/`streamTask` call in the page. Run `node scripts/ai-cost.mjs` aft
 | [lib/safeUrl.ts](../lib/safeUrl.ts) | 16 | safeHref | 4 |
 | [lib/session.ts](../lib/session.ts) | 64 | currentEpoch, requireSession, revokeAllSessions, revokeSession | 10 |
 | [lib/stableJson.ts](../lib/stableJson.ts) | 22 | stableStringify | 3 |
-| [lib/store.ts](../lib/store.ts) | 694 | defaultProfile, defaultStats, defaultStrategy, store, sync | 17 |
-| [lib/syncMerge.ts](../lib/syncMerge.ts) | 211 | COLLECTION_ID, Envelope, IncomingEntry, ListPatch, MAX_CLOCK_SKEW_MS, Resolution, TOMBSTONE_TTL_MS, Tombstones, +7 | 2 |
-| [lib/types.ts](../lib/types.ts) | 351 | AutoTailorPlan, DismissedJob, ImprovementBrief, InboxCursor, InboxMessage, Job, MailCategory, OUTCOME_STAGES, +21 | 19 |
+| [lib/store.ts](../lib/store.ts) | 742 | defaultProfile, defaultStats, defaultStrategy, store, sync | 19 |
+| [lib/syncMerge.ts](../lib/syncMerge.ts) | 227 | COLLECTION_ID, Envelope, IncomingEntry, ListPatch, MAX_CLOCK_SKEW_MS, Resolution, TOMBSTONE_TTL_MS, Tombstones, +7 | 2 |
+| [lib/today.ts](../lib/today.ts) | 177 | TodayInput, TodayItem, appliedKeys, buildToday | 2 |
+| [lib/types.ts](../lib/types.ts) | 363 | AutoTailorPlan, DismissedJob, ImprovementBrief, InboxCursor, InboxMessage, Job, MailCategory, OUTCOME_STAGES, +21 | 21 |
 | [lib/useCancellable.ts](../lib/useCancellable.ts) | 26 | useCancellable | 4 |
-| [next.config.mjs](../next.config.mjs) | 59 | — | 0 |
-| [postcss.config.mjs](../postcss.config.mjs) | 10 | — | 0 |
-| [proxy.ts](../proxy.ts) | 41 | config, proxy | 0 |
-| [tailwind.config.ts](../tailwind.config.ts) | 55 | — | 0 |
+| [next.config.mjs](../next.config.mjs) | 36 | — | 0 |
+| [postcss.config.mjs](../postcss.config.mjs) | 9 | — | 0 |
+| [proxy.ts](../proxy.ts) | 97 | config, proxy | 0 |
 | [tests/agentFields.test.mjs](../tests/agentFields.test.mjs) | 35 | — | 0 |
-| [tests/helpers.mjs](../tests/helpers.mjs) | 10 | lib | 3 |
-| [tests/jobFilters.test.mjs](../tests/jobFilters.test.mjs) | 78 | — | 0 |
-| [tests/scoring.test.mjs](../tests/scoring.test.mjs) | 94 | — | 0 |
-| [tests/syncMerge.test.mjs](../tests/syncMerge.test.mjs) | 70 | — | 0 |
+| [tests/gemini.test.mjs](../tests/gemini.test.mjs) | 114 | — | 0 |
+| [tests/helpers.mjs](../tests/helpers.mjs) | 10 | lib | 5 |
+| [tests/jobFilters.test.mjs](../tests/jobFilters.test.mjs) | 108 | — | 0 |
+| [tests/scoring.test.mjs](../tests/scoring.test.mjs) | 128 | — | 0 |
+| [tests/syncMerge.test.mjs](../tests/syncMerge.test.mjs) | 97 | — | 0 |
+| [tests/today.test.mjs](../tests/today.test.mjs) | 81 | — | 0 |
 
 ## Commands
 

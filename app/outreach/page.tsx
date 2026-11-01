@@ -30,6 +30,10 @@ export default function OutreachPage() {
   const [success, setSuccess] = useState("");
   const [sent, setSent] = useState<SentEmail[]>([]);
   const [hasResume, setHasResume] = useState(true);
+  /** The inbox mail being answered, so the reply threads and the mail gets closed. */
+  const [replyOf, setReplyOf] = useState<{ messageId?: string; subject?: string; uid?: string } | null>(null);
+  /** The sent email a follow-up is for, whose reminder ends once this goes out. */
+  const [followUpOf, setFollowUpOf] = useState<string | null>(null);
 
   // Newest first — the list is stored in send order.
   const sentList = useMemo(() => sent.slice().reverse(), [sent]);
@@ -47,8 +51,31 @@ export default function OutreachPage() {
       if (draft.role) setRole(draft.role);
       if (draft.company) setCompany(draft.company);
       if (draft.context) setContext(draft.context);
+      if (draft.inboxUid) {
+        setReplyOf({ messageId: draft.inReplyTo, subject: draft.replySubject, uid: draft.inboxUid });
+      }
     }
   }, []);
+
+  function startFollowUp(e: SentEmail) {
+    setMode("reply");
+    setTo(e.to);
+    setRole(e.role);
+    setCompany(e.company || "");
+    setReplyOf(null);
+    setFollowUpOf(e.id);
+    setContext(
+      `I sent this on ${new Date(e.at).toLocaleDateString()} and haven't heard back. Write a short, polite follow-up that adds one new reason I'm a fit — do not repeat the original email.\n\nOriginal:\n${e.body}`
+    );
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  /** Ends a reminder: they replied elsewhere, or it isn't worth chasing. */
+  function clearFollowUp(id: string) {
+    const next = store.getEmails().map((e) => (e.id === id ? { ...e, followUpDue: undefined } : e));
+    store.setEmails(next);
+    setSent(next);
+  }
 
   async function compose() {
     const resume = store.getResume();
@@ -71,7 +98,10 @@ export default function OutreachPage() {
           shareCompensation,
         }
       );
-      setSubject(out.subject);
+      // Mail clients thread on the subject as well as the headers, so a reply keeps
+      // theirs rather than taking the AI's fresh one.
+      const original = replyOf?.subject;
+      setSubject(original ? (/^re:/i.test(original) ? original : `Re: ${original}`) : out.subject);
       setBody(out.body);
       setNote(out.note);
     } catch (err: any) {
@@ -121,6 +151,7 @@ export default function OutreachPage() {
           text: body.trim(),
           fromName: profile.name,
           attachment,
+          inReplyTo: replyOf?.messageId,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -139,11 +170,22 @@ export default function OutreachPage() {
         company: company || undefined,
         hadAttachment: !!attachment,
         at: Date.now(),
-        followUpDue: Date.now() + 5 * 24 * 60 * 60 * 1000,
+        // One nudge per email. A follow-up does not start another reminder, and it
+        // ends the one it answers: that stayed overdue for good, so the banner
+        // kept asking about mail already chased.
+        followUpDue: followUpOf ? undefined : Date.now() + 5 * 24 * 60 * 60 * 1000,
       };
-      const next = [...store.getEmails(), record];
+      const next = [
+        ...store.getEmails().map((e) => (e.id === followUpOf ? { ...e, followUpDue: undefined } : e)),
+        record,
+      ];
       store.setEmails(next);
       setSent(next);
+      if (replyOf?.uid) {
+        store.setInbox(store.getInbox().map((m) => (m.uid === replyOf.uid ? { ...m, handled: true } : m)));
+      }
+      setReplyOf(null);
+      setFollowUpOf(null);
       setSuccess(`✅ Sent to ${record.to} from your Gmail — a copy is in your Sent folder.`);
       setSubject("");
       setBody("");
@@ -183,19 +225,19 @@ export default function OutreachPage() {
       )}
 
       {dueFollowUps.length > 0 && (
-        <div className="text-xs text-amberx-400 bg-amberx-500/10 border border-amberx-500/25 rounded-xl px-4 py-3">
+        <div className="alert-warn">
           ⏰ {dueFollowUps.length} email{dueFollowUps.length > 1 ? "s" : ""} sent 5+ days
           ago with no follow-up — scroll down to nudge them.
         </div>
       )}
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3 whitespace-pre-wrap">
+        <div className="alert-error whitespace-pre-wrap">
           {error}
         </div>
       )}
       {success && (
-        <div className="text-sm text-neon-400 bg-neon-500/10 border border-neon-500/25 rounded-xl px-4 py-3">
+        <div className="alert-success">
           {success}
         </div>
       )}
@@ -211,8 +253,8 @@ export default function OutreachPage() {
                 aria-pressed={mode === m}
                 className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold border transition ${
                   mode === m
-                    ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
-                    : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                    ? "chip-on"
+                    : "chip-off"
                 }`}
               >
                 {m === "new" ? "✉ New application email" : "↩ Reply to HR"}
@@ -312,6 +354,9 @@ export default function OutreachPage() {
         {/* Draft + send */}
         <div className="card-pad space-y-4">
           <h2 className="h2">Draft</h2>
+          {replyOf?.messageId && (
+            <p className="text-xs text-ink-400">Goes out as a reply in their email thread.</p>
+          )}
           <div>
             <label className="label" htmlFor="outreach-subject">Subject</label>
             <input id="outreach-subject"
@@ -388,21 +433,17 @@ export default function OutreachPage() {
                       <div className="flex items-center gap-2">
                         {e.hadAttachment && <span className="badge-blue">📎 resume</span>}
                         {overdue ? (
-                          <button
-                            className="badge-amber hover:opacity-80"
-                            onClick={() => {
-                              setMode("reply");
-                              setTo(e.to);
-                              setRole(e.role);
-                              setCompany(e.company || "");
-                              setContext(
-                                `I sent this on ${new Date(e.at).toLocaleDateString()} and haven't heard back. Write a short, polite follow-up that adds one new reason I'm a fit — do not repeat the original email.\n\nOriginal:\n${e.body}`
-                              );
-                              window.scrollTo({ top: 0, behavior: "smooth" });
-                            }}
-                          >
-                            ⏰ follow up
-                          </button>
+                          <>
+                            <button className="badge-amber hover:opacity-80" onClick={() => startFollowUp(e)}>
+                              ⏰ follow up
+                            </button>
+                            <button
+                              className="text-[11px] text-ink-400 hover:text-ink-200"
+                              onClick={() => clearFollowUp(e.id)}
+                            >
+                              No need
+                            </button>
+                          </>
                         ) : (
                           <span className="badge-green">sent</span>
                         )}

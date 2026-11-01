@@ -81,12 +81,10 @@ export async function streamTask(
   const opts: StreamOptions =
     options instanceof AbortSignal ? { signal: options } : options ?? {};
   const strategy = store.getStrategy();
-  const res = await fetch("/api/ai", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ task, input, strategyAddendum: strategy.systemAddendum }),
-    signal: opts.signal,
-  });
+  const res = await post(
+    JSON.stringify({ task, input, strategyAddendum: strategy.systemAddendum }),
+    opts.signal
+  );
   if (!res.ok || !res.body) {
     throw new Error((await safeError(res)) || `AI request failed (${res.status})`);
   }
@@ -164,12 +162,7 @@ export async function jsonTask<T>(
   }
 
   const run = (async () => {
-    const res = await fetch("/api/ai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: opts.signal,
-    });
+    const res = await post(JSON.stringify(payload), opts.signal);
     if (!res.ok) {
       throw new Error((await safeError(res)) || `AI request failed (${res.status})`);
     }
@@ -194,11 +187,31 @@ export async function jsonTask<T>(
   }
 }
 
+/** Fetch, with the browser's "Failed to fetch" turned into something actionable. */
+async function post(body: string, signal?: AbortSignal): Promise<Response> {
+  try {
+    return await fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      signal,
+    });
+  } catch (err) {
+    if ((err as Error)?.name === "AbortError") throw err;
+    throw new Error("Couldn't reach the server. Check your connection and try again.");
+  }
+}
+
 async function safeError(res: Response): Promise<string | null> {
+  // A session that ended, or the platform timing a function out, answers without
+  // this app's JSON — and "AI request failed (504)" tells you nothing to do.
+  if (res.status === 401) return "Your session expired. Sign in again; nothing here has been lost.";
+  if (res.status === 413) return "That is too much text to send at once. Shorten it and try again.";
   try {
     const data = await res.json();
-    return data?.error || null;
+    if (data?.error) return data.error;
   } catch {
-    return null;
+    /* not JSON */
   }
+  return res.status === 504 ? "The AI took too long to answer. Try again." : null;
 }

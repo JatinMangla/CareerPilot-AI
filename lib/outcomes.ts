@@ -2,6 +2,7 @@
 
 import { store } from "./store";
 import { fingerprint } from "./jobFilters";
+import { appliedKeys } from "./today";
 import type { OutcomeStage, PreparedApplication, QueuedApplication } from "./types";
 
 /**
@@ -173,19 +174,33 @@ export function outcomeSnapshot() {
   };
 }
 
-/** Facts to stamp on an application at the moment it is sent. */
+/**
+ * Facts to stamp on an application at the moment it is sent. The job may have
+ * gone from the list by then, and overwriting with undefined lost the source and
+ * score already recorded when the application was prepared.
+ */
 export function applicationStamp(job: { source?: string; matchScore?: number } | undefined) {
   return {
-    source: job?.source,
-    matchScore: job?.matchScore,
+    ...(job ? { source: job.source, matchScore: job.matchScore } : {}),
     resumeVersion: store.getResume()?.updatedAt,
   };
 }
 
-/** Applications to a company, for matching an employer's reply to what was sent. */
-export function applicationsAt(company: string): TrackedApplication[] {
+/** Every job already applied to, whichever flow sent it. */
+export function appliedJobs(): Set<string> {
+  return appliedKeys(store.getApps(), store.getQueue());
+}
+
+/**
+ * Applications to a company, for matching an employer's reply to what was sent.
+ * Pass `list` when calling per row: it parses two large stored lists otherwise.
+ */
+export function applicationsAt(
+  company: string,
+  list: TrackedApplication[] = trackedApplications()
+): TrackedApplication[] {
   const key = fingerprint({ company, title: "" });
-  return trackedApplications().filter((a) => fingerprint({ company: a.company, title: "" }) === key);
+  return list.filter((a) => fingerprint({ company: a.company, title: "" }) === key);
 }
 
 /** Records a new stage for an application, whichever list it lives in. */

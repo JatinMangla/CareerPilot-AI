@@ -7,7 +7,8 @@ import { jsonTask } from "@/lib/aiClient";
 import { mapPool, AI_CONCURRENCY } from "@/lib/pool";
 import { quota } from "@/lib/quota";
 import { isVerifiedSource } from "@/lib/ats";
-import { isBlockedListing } from "@/lib/jobFilters";
+import { fingerprint, isBlockedListing } from "@/lib/jobFilters";
+import { appliedJobs } from "@/lib/outcomes";
 import { safeHref } from "@/lib/safeUrl";
 import { useCancellable } from "@/lib/useCancellable";
 import RunProgress from "@/components/RunProgress";
@@ -29,7 +30,8 @@ const PAGE_SIZE = 15;
  * the sources it produced, so switching filters switches the list immediately.
  */
 const BUCKETS: Record<Focus, (source: string) => boolean> = {
-  boards: (s) => s === "company-boards",
+  // YC companies are company boards as well. YC is the narrower view of the same list.
+  boards: (s) => s === "company-boards" || s === "yc-boards",
   yc: (s) => s === "yc-boards",
   portals: (s) => s === "jsearch" || s === "adzuna",
   all: () => true,
@@ -39,7 +41,7 @@ const FILTERS: { k: Focus; label: string; hint: string }[] = [
   {
     k: "boards",
     label: "🏢 Company boards",
-    hint: "120 company career boards (Greenhouse / Lever / Ashby) — first-party, always current, and auto-applyable.",
+    hint: "120 company career boards (Greenhouse / Lever / Ashby) — first-party, always current, and ready for Auto-Pilot.",
   },
   {
     k: "yc",
@@ -66,6 +68,19 @@ const BATCH = 20;
  * search costs 2 calls up front instead of ~19, and nothing is silently dropped.
  */
 const AUTO_ANALYZE = 40;
+
+type Sort = "match" | "newest";
+
+const postedTime = (j: Job) => new Date(j.postedAt || j.foundAt || 0).getTime() || 0;
+
+/** "Posted 3 days ago". Early applicants get read, so this belongs on the card. */
+function postedLabel(job: Job): string {
+  if (!job.postedAt) return "";
+  const days = Math.floor((Date.now() - new Date(job.postedAt).getTime()) / 86_400_000);
+  if (!Number.isFinite(days) || days < 0) return "";
+  if (days === 0) return "Posted today";
+  return `Posted ${days} day${days === 1 ? "" : "s"} ago`;
+}
 
 interface AnalysisRow {
   id: string;
@@ -182,8 +197,13 @@ export default function JobsPage() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [dismissedCount, setDismissedCount] = useState(0);
   const [offerAiLeads, setOfferAiLeads] = useState(false);
+  const [filterText, setFilterText] = useState("");
+  const [sort, setSort] = useState<Sort>("match");
+  const [hideApplied, setHideApplied] = useState(true);
+  const [applied, setApplied] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    setApplied(appliedJobs());
     const profile = store.getProfile();
     setJobs(store.getJobs());
     setHasResume(!!store.getResume()?.text);
@@ -192,23 +212,32 @@ export default function JobsPage() {
     if (profile.desiredRoles) setQuery(profile.desiredRoles.split(/[,/|]/)[0].trim());
   }, []);
 
-  const visible = useMemo(
-    () =>
-      jobs
-        .filter((j) => BUCKETS[focus](j.source))
-        .filter((j) => !isBlockedListing(j.url, j.company))
-        .slice()
-        // AI-analysed first — the quick score is a different, rougher scale —
-        // then by score within each group.
-        .sort(
-          (a, b) =>
+  const visible = useMemo(() => {
+    const words = filterText.toLowerCase().split(/\s+/).filter(Boolean);
+    return jobs
+      .filter((j) => BUCKETS[focus](j.source))
+      .filter((j) => !isBlockedListing(j.url, j.company))
+      .filter((j) => !hideApplied || !applied.has(fingerprint(j)))
+      .filter((j) => {
+        if (!words.length) return true;
+        const text = `${j.title} ${j.company} ${j.location}`.toLowerCase();
+        return words.every((w) => text.includes(w));
+      })
+      .sort((a, b) =>
+        sort === "newest"
+          ? postedTime(b) - postedTime(a)
+          : // AI-analysed first — the quick score is a different, rougher scale —
+            // then by score within each group.
             Number(b.aiScored !== false) - Number(a.aiScored !== false) ||
             b.matchScore - a.matchScore
-        ),
-    [jobs, focus]
-  );
+      );
+  }, [jobs, focus, filterText, sort, hideApplied, applied]);
 
-  const { page, pageCount, pageItems, setPage } = usePaged(visible, PAGE_SIZE, focus);
+  const { page, pageCount, pageItems, setPage } = usePaged(
+    visible,
+    PAGE_SIZE,
+    `${focus}|${filterText}|${sort}|${hideApplied}`
+  );
 
   const counts = useMemo(() => {
     const c = {} as Record<Focus, number>;
@@ -228,6 +257,9 @@ export default function JobsPage() {
     setNotice("");
     setOfferAiLeads(false);
     setBusy(true);
+    // Covers the search as well as the analysis. Stop was on screen during the
+    // search but did nothing until the analysis began.
+    const signal = run.start();
     try {
       const profile = store.getProfile();
       setStatus(
@@ -239,6 +271,7 @@ export default function JobsPage() {
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({
           query,
           location,
@@ -258,10 +291,14 @@ export default function JobsPage() {
         setError(live.error || `Job search failed (${res.status}). Try again in a moment.`);
         return;
       }
+      const warnings: string[] = live.warnings || [];
       if (!live.available || !live.listings?.length) {
         setError(
-          "No live listings matched. Try a broader role (e.g. \"software engineer\"), " +
-            "a wider location (\"India\" or \"Remote\"), or the Everything filter."
+          [
+            "No live listings matched. Try a broader role (e.g. \"software engineer\"), " +
+              "a wider location (\"India\" or \"Remote\"), or the Everything filter.",
+            ...warnings,
+          ].join(" ")
         );
         setOfferAiLeads(true);
         return;
@@ -281,12 +318,12 @@ export default function JobsPage() {
       const result = await analyzeJobs(top, resume.text, profile, (done, total) =>
         setStatus(`Analysing the best ${top.length} of ${quick.length} listings… ${done}/${total} batches`),
         // Stopping keeps every listing: the ones not yet analysed keep their quick score.
-        run.start()
+        signal
       );
       const byId = new Map(result.analyzed.map((j) => [j.id, j]));
       const all = quick.map((j) => byId.get(j.id) ?? j);
 
-      const { jobs: merged, added } = store.addJobs(all);
+      const { jobs: merged, added, pruned } = store.addJobs(all);
       store.bumpStat("jobsAnalyzed", result.analyzed.length);
       setJobs(merged);
 
@@ -298,12 +335,14 @@ export default function JobsPage() {
           result.failed
             ? `${result.failed} of ${result.batches} AI batches failed (${result.firstError}); those jobs keep their quick score.`
             : "",
+          pruned ? `${pruned} old unanalysed listing${pruned === 1 ? "" : "s"} cleared to make room.` : "",
+          ...warnings,
         ]
           .filter(Boolean)
           .join(" ")
       );
     } catch (err: any) {
-      setError(err.message);
+      if (err.name !== "AbortError") setError(err.message);
     } finally {
       setBusy(false);
       setStatus("");
@@ -432,8 +471,8 @@ export default function JobsPage() {
                 onClick={() => setQuery(s)}
                 className={`rounded-full px-2.5 py-1 text-[11px] border transition ${
                   query.toLowerCase() === s.toLowerCase()
-                    ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
-                    : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                    ? "chip-on"
+                    : "chip-off"
                 }`}
               >
                 {s}
@@ -472,8 +511,8 @@ export default function JobsPage() {
               title={o.hint}
               className={`rounded-full px-3.5 py-1.5 text-xs font-semibold border transition ${
                 focus === o.k
-                  ? "bg-neon-500/15 text-neon-400 border-neon-500/40"
-                  : "bg-ink-850 text-ink-400 border-ink-700 hover:text-ink-200"
+                  ? "chip-on"
+                  : "chip-off"
               }`}
             >
               {o.label}
@@ -527,7 +566,7 @@ export default function JobsPage() {
       )}
       <RunProgress text={status} onStop={busy ? run.cancel : undefined} />
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
           {offerAiLeads && (
             <div className="mt-2 text-xs text-ink-300">
@@ -548,20 +587,56 @@ export default function JobsPage() {
 
       {jobs.length > 0 && (
         <>
+          {/* Narrows what is already saved. It works instantly and spends nothing,
+              unlike the search above. */}
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              className="input flex-1 min-w-[200px] w-auto py-2"
+              aria-label="Filter saved jobs by title, company or location"
+              placeholder="Filter by title, company or location…"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+            />
+            <select
+              className="input w-auto py-2 text-xs"
+              aria-label="Sort jobs"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as Sort)}
+            >
+              <option value="match">Best match first</option>
+              <option value="newest">Newest first</option>
+            </select>
+            <label className="flex items-center gap-2 text-xs text-ink-300 cursor-pointer">
+              <input
+                type="checkbox"
+                className="accent-neon-500"
+                checked={hideApplied}
+                onChange={(e) => setHideApplied(e.target.checked)}
+              />
+              Hide applied
+            </label>
+          </div>
+
           {(() => {
             const unverified = visible.filter((j) => !isVerifiedSource(j.source)).length;
             if (!visible.length) {
               return (
                 <div className="card-pad text-sm text-ink-300">
-                  Nothing in <b className="text-ink-100">{activeFilter.label}</b> yet — press
-                  “Find my matches” with this filter selected and it fills up with its own
-                  listings. Other filters keep their results separately.
+                  {filterText ? (
+                    <>Nothing saved matches “{filterText}”.</>
+                  ) : (
+                    <>
+                      Nothing in <b className="text-ink-100">{activeFilter.label}</b> yet — press
+                      “Find my matches” with this filter selected and it fills up with its own
+                      listings. Other filters keep their results separately.
+                    </>
+                  )}
                 </div>
               );
             }
             if (unverified === visible.length) {
               return (
-                <div className="text-xs text-amberx-400 bg-amberx-500/10 border border-amberx-500/25 rounded-xl px-4 py-3 leading-relaxed">
+                <div className="alert-warn">
                   ⚠ These are <b>AI-researched leads</b>, not verified listings — the company
                   may be real but the role and link may not be. Verify each one before
                   applying; Auto-Pilot won&apos;t prepare them.
@@ -603,7 +678,12 @@ export default function JobsPage() {
 
           <div className="grid gap-4">
             {pageItems.map((job) => (
-              <JobCard key={job.id} job={job} onDismiss={() => dismiss(job)} />
+              <JobCard
+                key={job.id}
+                job={job}
+                applied={applied.has(fingerprint(job))}
+                onDismiss={() => dismiss(job)}
+              />
             ))}
           </div>
 
@@ -619,14 +699,14 @@ export default function JobsPage() {
             <div className="card-pad flex items-center justify-between gap-4 flex-wrap">
               <p className="text-sm text-ink-300">
                 Ready to apply? Auto-Pilot tailors your resume per job and opens each
-                application for you; Auto-Apply builds a cover letter + screening answers.
+                application for you; Apply Kits builds a cover letter and screening answers.
               </p>
               <div className="flex gap-2">
                 <Link href="/apply?tab=pilot" className="btn-primary">
                   ✦ Auto-Pilot
                 </Link>
                 <Link href="/apply?tab=kits" className="btn-secondary">
-                  ➤ Auto-Apply
+                  ➤ Apply Kits
                 </Link>
               </div>
             </div>
@@ -645,8 +725,9 @@ const SOURCE_LABELS: Record<string, string> = {
   "ai-researched": "AI lead",
 };
 
-function JobCard({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
+function JobCard({ job, applied, onDismiss }: { job: Job; applied: boolean; onDismiss: () => void }) {
   const [open, setOpen] = useState(false);
+  const posted = postedLabel(job);
   const quick = job.aiScored === false;
   const scoreTone = quick
     ? "badge-blue"
@@ -663,9 +744,11 @@ function JobCard({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
           <h3 className="font-display font-bold text-base text-ink-100">{job.title}</h3>
           <p className="text-sm text-ink-300 mt-0.5">
             {job.company} · {job.location}
+            {posted && <span className="text-ink-400"> · {posted}</span>}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {applied && <span className="badge-green">✓ Applied</span>}
           <span className="badge-blue text-[10px]">
             {SOURCE_LABELS[job.source] || job.source}
           </span>

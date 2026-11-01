@@ -14,6 +14,7 @@ export default function ValidatePage() {
   const router = useRouter();
   const [result, setResult] = useState<ValidationResult | null>(null);
   const [hasResume, setHasResume] = useState(true);
+  const [resumeAt, setResumeAt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -25,7 +26,9 @@ export default function ValidatePage() {
   useEffect(() => {
     const saved = store.getValidation();
     if (saved) adopt(saved);
-    setHasResume(!!store.getResume()?.text);
+    const resume = store.getResume();
+    setHasResume(!!resume?.text);
+    setResumeAt(resume?.updatedAt ?? 0);
   }, []);
 
   /** Show a result and pre-select every finding — opting out is the rare case. */
@@ -105,7 +108,7 @@ export default function ValidatePage() {
       )}
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}
@@ -118,6 +121,12 @@ export default function ValidatePage() {
 
       {result && !busy && (
         <>
+          {resumeAt > result.at && (
+            <div className="alert-warn">
+              Your resume has changed since this ran, so these scores describe the older
+              version. Re-validate to see where it stands now.
+            </div>
+          )}
           <div className="grid sm:grid-cols-2 gap-4">
             <ScoreRing label="Overall score" score={result.overallScore} />
             <ScoreRing label="ATS compatibility" score={result.atsScore} />

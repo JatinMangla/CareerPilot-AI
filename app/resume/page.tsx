@@ -7,6 +7,15 @@ import { streamTask } from "@/lib/aiClient";
 import { confirmMarkers, describeClaims, newClaims } from "@/lib/claimCheck";
 import type { ImprovementBrief, ResumeData } from "@/lib/types";
 
+/**
+ * The resume part of an improvement. Matches the heading however the model spells
+ * it: an exact string missed "## WHAT I CHANGED", and the commentary below it was
+ * then saved as part of the resume.
+ */
+function resumePart(output: string): string {
+  return output.split(/^[\s#*=-]*what i changed[\s#*=:-]*$/im)[0].trim();
+}
+
 /** How many individual fixes a brief carries. */
 function briefCount(b: ImprovementBrief | null): number {
   if (!b) return 0;
@@ -140,14 +149,20 @@ export default function ResumePage() {
   async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Checked here because the platform turns away larger bodies with an HTML
+    // page, which surfaced as "Unexpected token R in JSON".
+    if (file.size > 4 * 1024 * 1024) {
+      if (fileRef.current) fileRef.current.value = "";
+      return setError("That file is over 4 MB. Upload a smaller one, or paste the text.");
+    }
     setError("");
     setBusy("upload");
     try {
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch("/api/parse-resume", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
       save(data.text, "upload", data.fileName);
     } catch (err: any) {
       setError(err.message);
@@ -186,9 +201,7 @@ export default function ResumePage() {
       );
       setAiOutput(final);
       setAiComplete(true);
-      setClaimNote(
-        describeClaims(newClaims(text, final.split("=== WHAT I CHANGED ===")[0]))
-      );
+      setClaimNote(describeClaims(newClaims(text, resumePart(final))));
       store.bumpStat("improvements");
     } catch (err: any) {
       if (err.name !== "AbortError") setError(err.message);
@@ -198,7 +211,7 @@ export default function ResumePage() {
   }
 
   function acceptImproved() {
-    const improved = aiOutput.split("=== WHAT I CHANGED ===")[0].trim();
+    const improved = resumePart(aiOutput);
     if (!improved || !aiComplete) return;
     save(improved, "AI improvement");
     setAiOutput("");
@@ -219,7 +232,7 @@ export default function ResumePage() {
       </div>
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}

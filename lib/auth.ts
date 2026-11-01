@@ -1,8 +1,7 @@
 /**
- * Session signing shared by the login routes (Node) and middleware (Edge).
- * Uses Web Crypto so it runs in both runtimes. Nothing here touches Redis —
- * middleware must stay fast and stateless. Revocation lives in lib/session.ts,
- * which the API routes call on top of this.
+ * Session signing shared by the login routes and the route gate (proxy.ts).
+ * Nothing here touches Redis — the gate runs on every request and stays stateless.
+ * Revocation lives in lib/session.ts, which the API routes call on top of this.
  */
 
 export const SESSION_COOKIE = "cp_session";
@@ -37,8 +36,7 @@ export function ownerEmail(): string {
 
 /**
  * Constant-time string comparison. `===` returns at the first differing byte,
- * which leaks how much of a guess was right through response timing. Pure JS
- * because Node's timingSafeEqual does not exist in the Edge runtime.
+ * which leaks how much of a guess was right through response timing.
  */
 export function safeEqual(a: string, b: string): boolean {
   const len = Math.max(a.length, b.length);

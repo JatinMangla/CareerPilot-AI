@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { store } from "@/lib/store";
 import { jsonTask, streamTask } from "@/lib/aiClient";
-import { describeClaims, newClaims } from "@/lib/claimCheck";
+import { confirmMarkers, describeClaims, newClaims } from "@/lib/claimCheck";
 import type { TailorPlan, ResumeData } from "@/lib/types";
 import CopyButton from "@/components/CopyButton";
 
@@ -171,7 +171,7 @@ export default function TailorPage() {
       )}
 
       {error && (
-        <div className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3">
+        <div className="alert-error">
           {error}
         </div>
       )}
@@ -203,8 +203,8 @@ export default function TailorPage() {
               <h2 className="h2">The AI needs to ask you first</h2>
               {plan.questions.map((q, i) => (
                 <div key={i}>
-                  <label className="label" htmlFor="tailor-field">{q}</label>
-                  <input id="tailor-field"
+                  <label className="label" htmlFor={`tailor-q-${i}`}>{q}</label>
+                  <input id={`tailor-q-${i}`}
                     className="input"
                     placeholder="Your answer (leave empty to skip)"
                     value={answers[i] || ""}
@@ -320,14 +320,28 @@ export default function TailorPage() {
                 className="btn-secondary"
                 disabled={!complete || !output.trim()}
                 onClick={async () => {
-                  const { buildResumePdf, downloadBlob } = await import("@/lib/pdf/resumeDoc");
-                  const name = store.getProfile().name || "Resume";
-                  const saved = window.localStorage.getItem("cp_pdf_template");
-                  const tpl = saved === "modern" ? "modern" : "classic";
-                  downloadBlob(
-                    await buildResumePdf(output, name, tpl),
-                    `${name.replace(/\s+/g, "_")}_Resume_Tailored.pdf`
-                  );
+                  // The same check My Resume makes: a [confirm] is a detail nobody
+                  // has verified, and this PDF is going to an employer.
+                  const markers = confirmMarkers(output);
+                  if (
+                    markers &&
+                    !window.confirm(
+                      `This still has ${markers} unverified [confirm] marker${markers === 1 ? "" : "s"}. Export anyway?`
+                    )
+                  )
+                    return;
+                  try {
+                    const { buildResumePdf, downloadBlob } = await import("@/lib/pdf/resumeDoc");
+                    const name = store.getProfile().name || "Resume";
+                    const saved = window.localStorage.getItem("cp_pdf_template");
+                    const tpl = saved === "modern" ? "modern" : "classic";
+                    downloadBlob(
+                      await buildResumePdf(output, name, tpl),
+                      `${name.replace(/\s+/g, "_")}_Resume_Tailored.pdf`
+                    );
+                  } catch (err: any) {
+                    setError(`PDF failed: ${err.message}`);
+                  }
                 }}
               >
                 ⬇ Download PDF

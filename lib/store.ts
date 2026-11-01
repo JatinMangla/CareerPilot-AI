@@ -17,7 +17,7 @@ import type {
   ImprovementBrief,
   DismissedJob,
 } from "./types";
-import { fingerprint, sourceRank } from "./jobFilters";
+import { fingerprint, pruneJobs, sourceRank } from "./jobFilters";
 import { diffList, hashList, isCollection, type IncomingEntry } from "./syncMerge";
 
 const KEYS = {
@@ -340,6 +340,34 @@ async function pull(): Promise<boolean> {
     }
 
     const serverRevs: Record<string, number> = payload.revs || {};
+    const seen = readRevs();
+    const needed = Object.keys(serverRevs).filter(
+      (k) => !DEVICE_ONLY.has(k) && serverRevs[k] > (seen[k] ?? 0)
+    );
+
+    let rows: Record<string, { value: unknown; at: number; rev: number }> = {};
+    if (needed.length) {
+      const res2 = await fetch(`/api/state?keys=${encodeURIComponent(needed.join(","))}`, {
+        cache: "no-store",
+      });
+      if (res2.status === 401) {
+        authExpired();
+        return false;
+      }
+      const p2 = await res2.json().catch(() => null);
+      if (!res2.ok || !p2) {
+        setSyncState("error", p2?.error || `Sync failed (${res2.status})`);
+        return false;
+      }
+      rows = p2.data || {};
+    }
+
+    /*
+     * Read only now, after the last await, and nothing below yields. These used
+     * to be read before the download above, which on an inbox can take seconds:
+     * a change made meanwhile was then overwritten by the older value coming in,
+     * and saving the stale dirty set wiped its flag, so it never synced at all.
+     */
     const revs = readRevs();
     const meta = readMeta();
     const dirty = readDirty();
@@ -355,47 +383,31 @@ async function pull(): Promise<boolean> {
       }
     }
 
-    const needed = Object.keys(serverRevs).filter(
-      (k) => !DEVICE_ONLY.has(k) && serverRevs[k] > (revs[k] ?? 0)
-    );
-    if (needed.length) {
-      const res2 = await fetch(`/api/state?keys=${encodeURIComponent(needed.join(","))}`, {
-        cache: "no-store",
-      });
-      if (res2.status === 401) {
-        authExpired();
-        return false;
+    for (const [k, entry] of Object.entries(rows)) {
+      const localRev = revs[k] ?? 0;
+      // A push finished while this download was in flight, so what is here is
+      // already newer than what arrived.
+      if (entry.rev <= localRev) continue;
+      // Both sides changed since this device last synced: the push merges it
+      // on the server and hands the result back.
+      if (dirty.has(k) && localRev > 0) continue;
+      // First sync since revisions existed, and this copy is the newer one:
+      // send it on top of the server's revision instead of taking the older.
+      if (
+        localRev === 0 &&
+        window.localStorage.getItem(k) !== null &&
+        (meta[k] ?? -1) > entry.at
+      ) {
+        dirty.add(k);
+        revs[k] = entry.rev;
+        continue;
       }
-      const p2 = await res2.json().catch(() => null);
-      if (!res2.ok || !p2) {
-        setSyncState("error", p2?.error || `Sync failed (${res2.status})`);
-        return false;
-      }
-
-      const rows = (p2.data || {}) as Record<string, { value: unknown; at: number; rev: number }>;
-      for (const [k, entry] of Object.entries(rows)) {
-        const localRev = revs[k] ?? 0;
-        // Both sides changed since this device last synced: the push merges it
-        // on the server and hands the result back.
-        if (dirty.has(k) && localRev > 0) continue;
-        // First sync since revisions existed, and this copy is the newer one:
-        // send it on top of the server's revision instead of taking the older.
-        if (
-          localRev === 0 &&
-          window.localStorage.getItem(k) !== null &&
-          (meta[k] ?? -1) > entry.at
-        ) {
-          dirty.add(k);
-          revs[k] = entry.rev;
-          continue;
-        }
-        if (safeSet(k, JSON.stringify(entry.value))) {
-          meta[k] = entry.at;
-          revs[k] = entry.rev;
-          dirty.delete(k);
-          saveBase(k, entry.value);
-          changed.push(k);
-        }
+      if (safeSet(k, JSON.stringify(entry.value))) {
+        meta[k] = entry.at;
+        revs[k] = entry.rev;
+        dirty.delete(k);
+        saveBase(k, entry.value);
+        changed.push(k);
       }
     }
 
@@ -629,8 +641,17 @@ export const store = {
       }
     }
 
-    write(KEYS.jobs, merged);
-    return { jobs: merged, added };
+    // Every search adds up to 150 listings and nothing ever left, so the list
+    // grew until localStorage was full and saves began to fail.
+    const inUse = new Set<string>([
+      ...read<PreparedApplication[]>(KEYS.apps, []).map((a) => a.jobId),
+      ...read<QueuedApplication[]>(KEYS.queue, []).map((q) => q.jobId),
+      ...read<ReferralRecord[]>(KEYS.referrals, []).map((r) => r.jobId),
+    ]);
+    const kept = pruneJobs(merged, inUse, Date.now());
+
+    write(KEYS.jobs, kept);
+    return { jobs: kept, added, pruned: merged.length - kept.length };
   },
 
   getApps: () => read<PreparedApplication[]>(KEYS.apps, []),
@@ -689,5 +710,32 @@ export const store = {
     s[k] = (s[k] || 0) + by;
     write(KEYS.stats, s);
     return s;
+  },
+
+  /** Everything the app holds, as one object — the "download my data" backup. */
+  exportAll: () => {
+    const out: Record<string, unknown> = {};
+    if (typeof window === "undefined") return out;
+    for (const k of Object.keys(window.localStorage).sort()) {
+      if (!k.startsWith("cp_") || k.startsWith("cp_sync_") || k === META_KEY) continue;
+      out[k] = read<unknown>(k, null);
+    }
+    return out;
+  },
+
+  /** How many keys have changes this device has not yet got onto the server. */
+  unsyncedCount: () => readDirty().size,
+
+  /**
+   * Removes everything this browser holds. Signing out left the resume and the
+   * inbox readable on any machine you had used; on a shared one that matters.
+   * The server copy is untouched, so another device, or signing in here again,
+   * brings it all back.
+   */
+  clearDevice: () => {
+    if (typeof window === "undefined") return;
+    for (const k of Object.keys(window.localStorage)) {
+      if (k.startsWith("cp_")) window.localStorage.removeItem(k);
+    }
   },
 };

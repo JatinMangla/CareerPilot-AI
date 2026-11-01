@@ -6,12 +6,15 @@ export const maxDuration = 30;
 /**
  * Reads a public GitHub profile and its repositories.
  *
- * Uses GitHub's public REST API with no token — recruiters see exactly this
- * view, which is the point of the audit. Unauthenticated calls are limited to
- * 60/hour per IP, which is ample for an occasional review.
+ * Uses GitHub's public REST API — recruiters see exactly this view, which is the
+ * point of the audit. No token is needed, but unauthenticated calls are limited to
+ * 60/hour per IP, and on Vercel that IP is shared with other people's functions.
+ * An optional GITHUB_TOKEN with no scopes raises it to 5,000 without changing what
+ * is visible, since a token with no scopes reads public data only.
  */
 
 const GH = "https://api.github.com";
+const GH_TIMEOUT_MS = 12_000;
 
 function usernameFrom(input: string): string {
   const raw = (input || "").trim();
@@ -32,23 +35,27 @@ export async function POST(req: Request) {
     );
   }
 
-  const headers = {
+  const token = process.env.GITHUB_TOKEN?.trim();
+  const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "CareerPilot-AI",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
   try {
     const profileRes = await fetch(`${GH}/users/${username}`, {
       headers,
       cache: "no-store",
+      signal: AbortSignal.timeout(GH_TIMEOUT_MS),
     });
 
     if (profileRes.status === 404) {
       return Response.json({ error: `No public GitHub user "${username}".` }, { status: 404 });
     }
-    if (profileRes.status === 403) {
+    // GitHub answers a rate limit with either status.
+    if (profileRes.status === 403 || profileRes.status === 429) {
       return Response.json(
-        { error: "GitHub rate limit reached (60/hour). Try again in a little while." },
+        { error: "GitHub's rate limit was reached. Try again in a little while." },
         { status: 429 }
       );
     }
@@ -63,7 +70,7 @@ export async function POST(req: Request) {
 
     const reposRes = await fetch(
       `${GH}/users/${username}/repos?sort=updated&per_page=30&type=owner`,
-      { headers, cache: "no-store" }
+      { headers, cache: "no-store", signal: AbortSignal.timeout(GH_TIMEOUT_MS) }
     );
     const rawRepos: any[] = reposRes.ok ? await reposRes.json() : [];
 
@@ -104,6 +111,6 @@ export async function POST(req: Request) {
     });
   } catch (err: any) {
     console.error("[github] fetch failed", err?.message);
-    return Response.json({ error: `Could not reach GitHub: ${err?.message}` }, { status: 502 });
+    return Response.json({ error: "Couldn't reach GitHub. Try again in a moment." }, { status: 502 });
   }
 }
