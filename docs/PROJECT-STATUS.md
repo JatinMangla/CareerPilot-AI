@@ -14,8 +14,8 @@ _Last updated: 2026-11-01_
 The app works end to end. On 2026-09-24 an adversarial audit found four problems: a weak login
 protecting Gmail access, silent data loss in sync, job matching from titles alone, and no record
 of which applications produced replies. All four were fixed. A second full review on 2026-11-01
-patched a critical Next.js advisory and fixed the bugs listed in the change log below. Nothing
-from that review is deployed until it is committed and pushed (see Open items).
+patched a critical Next.js advisory and fixed the bugs listed in the change log below. That work
+is deployed (commit 96f4404); what it could not test locally is under Open items.
 
 ---
 
@@ -230,12 +230,10 @@ from that review is deployed until it is committed and pushed (see Open items).
 
 ## Open items
 
-- **Deploy the 2026-11-01 work.** Production still runs Next 16.3.6, which is in the range of a
-  critical advisory. Nothing is fixed there until this work is committed and pushed.
 - **Not exercised on 2026-11-01:** a real Gmail read or send on imapflow 2 and nodemailer 10 (no
   local credentials; both libraries load, and the code uses only `connect`, `search`, `fetch` and
   `sendMail`), and the emailed login code path with its new daily cap (it would email the owner).
-  After deploying, sync the inbox once, send one test email, and sign in with a code.
+  In production: sync the inbox once, send one test email, and sign in with a code.
 - **Production logs were not read.** The Vercel connector and the local CLI both lack access to the
   `jatinmanglas-projects` scope.
 
@@ -300,6 +298,8 @@ Standing notes for future work, not defects:
 - **Verified:** `check.mjs` including the build; 50 browser checks in headless Chromium with no
   console errors or CSP violations; 19 end-to-end checks through the real routes against a fake
   Upstash, with real Gemini calls and a live board search (100 listings, all with descriptions).
+- **Deployed:** commit 96f4404. Checked on the live site: nonce CSP with no `unsafe-inline` or
+  `unsafe-eval`, 401 from `/api/state` without a session, and the login redirect keeping `next`.
 
 ### 2026-09-26: secrets rotated
 
